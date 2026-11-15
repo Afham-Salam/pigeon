@@ -110,8 +110,11 @@ export function IntegrationsSettings({
     setAlertForwarding(getSummary('ALERT_FORWARDING_ADDRESS')?.value || '');
   }, [settings]);
 
-  const computedRedirectUri =
-    typeof window !== 'undefined' ? `${window.location.origin}/auth/google/callback` : '';
+  const computedRedirectUri = apiBase
+    ? `${apiBase}/auth/google/callback`
+    : typeof window !== 'undefined'
+      ? `${window.location.origin}/auth/google/callback`
+      : '';
 
   const handleCopyRedirectUri = async () => {
     try {
