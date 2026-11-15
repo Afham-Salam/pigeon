@@ -100,17 +100,24 @@ export function evaluateRuleFilters(job: FilterableJob, profile: Profile): RuleF
     }
   }
 
-  // 4. Location and Remote Check
+  // 4. Location and Remote / Workplace Check
   const jobIsRemote =
     job.remote === true ||
     titleLower.includes('remote') ||
     (job.location || '').toLowerCase().includes('remote');
 
-  const requireRemote = filters.remote === true;
+  const jobIsHybrid =
+    titleLower.includes('hybrid') ||
+    (job.location || '').toLowerCase().includes('hybrid') ||
+    (job.description || '').toLowerCase().includes('hybrid');
+
+  const workplacePref =
+    filters.workplace_type ||
+    (filters.remote === true ? 'remote' : filters.remote === false ? 'onsite' : 'all');
   const allowedLocations = filters.locations || [];
 
-  if (requireRemote && !jobIsRemote) {
-    // If candidate requires remote and job is not remote, check if location matches allowed locations
+  if (workplacePref === 'remote' && !jobIsRemote) {
+    // If candidate prefers remote and job is not remote, check if location matches allowed locations
     if (allowedLocations.length > 0) {
       const jobLoc = (job.location || '').toLowerCase();
       const matchesLoc = allowedLocations.some((loc) => jobLoc.includes(loc.toLowerCase().trim()));
@@ -120,6 +127,20 @@ export function evaluateRuleFilters(job: FilterableJob, profile: Profile): RuleF
     } else {
       return { passed: false, reason: 'LOCATION_MISMATCH' };
     }
+  } else if (workplacePref === 'hybrid' && !jobIsHybrid) {
+    return { passed: false, reason: 'LOCATION_MISMATCH' };
+  } else if (workplacePref === 'remote_and_hybrid' && !jobIsRemote && !jobIsHybrid) {
+    if (allowedLocations.length > 0) {
+      const jobLoc = (job.location || '').toLowerCase();
+      const matchesLoc = allowedLocations.some((loc) => jobLoc.includes(loc.toLowerCase().trim()));
+      if (!matchesLoc) {
+        return { passed: false, reason: 'LOCATION_MISMATCH' };
+      }
+    } else {
+      return { passed: false, reason: 'LOCATION_MISMATCH' };
+    }
+  } else if (workplacePref === 'onsite' && jobIsRemote) {
+    return { passed: false, reason: 'LOCATION_MISMATCH' };
   } else if (!jobIsRemote && allowedLocations.length > 0) {
     const jobLoc = (job.location || '').toLowerCase();
     const matchesLoc = allowedLocations.some((loc) => jobLoc.includes(loc.toLowerCase().trim()));

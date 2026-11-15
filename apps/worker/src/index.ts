@@ -2031,7 +2031,7 @@ app.get('/api/applications', async (c) => {
        a.id, a.job_id, a.kind, a.channel, a.status, a.scheduled_at, a.sent_at, a.applied_at,
        a.resume_id, a.cover_letter, a.subject, a.retry_count, a.follow_up_count, a.notes,
        a.validator_errors, a.synced_at, a.updated_at,
-       j.title, j.company, j.location, j.source, j.source_kind, j.contact_email, j.match_score, j.apply_route
+       j.title, j.company, j.location, j.remote, j.source, j.source_kind, j.contact_email, j.match_score, j.apply_route
      FROM applications a
      JOIN jobs j ON a.job_id = j.id
      WHERE (? IS NULL OR a.status = ?)

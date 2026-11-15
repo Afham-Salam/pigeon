@@ -54,7 +54,7 @@ export const greenhouseAdapter: JobSource = {
     const userAgent =
       config?.userAgent || 'Pigeon/1.0 (Job Application Assistant; +https://github.com/pigeon)';
 
-    const slugs = await getAtsSlugs('greenhouse', config, ['github']);
+    const slugs = await getAtsSlugs('greenhouse', config, ['careem']);
     const allJobs: RawJob[] = [];
     const failedSlugs: string[] = [];
 

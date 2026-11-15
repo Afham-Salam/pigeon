@@ -61,7 +61,7 @@ export const WeWorkRemotelyItemSchema = z
     id: z.string().max(500).optional(),
     title: z.string().max(1000).optional(),
     link: z.string().max(5000).optional(),
-    description: z.string().max(100000).optional(),
+    description: z.string().max(1_000_000).optional(),
     pubDate: z.string().max(100).optional(),
     source: z.string().max(100).optional(),
   })

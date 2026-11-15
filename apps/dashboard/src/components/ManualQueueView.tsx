@@ -16,6 +16,7 @@ import {
 import { Button } from './ui/Button.js';
 import { StatusChip } from './ui/StatusChip.js';
 import { SourceLogo, getSourceDisplayName } from './ui/SourceLogo.js';
+import { WorkplaceBadge, getWorkplaceType } from './ui/WorkplaceBadge.js';
 import { apiFetch } from '../api.js';
 
 interface Props {
@@ -36,6 +37,7 @@ export function ManualQueueView({ apiBase = '' }: Props): React.JSX.Element {
   const [editedLetter, setEditedLetter] = useState<string>('');
   const [savingLetter, setSavingLetter] = useState(false);
   const [letterErrors, setLetterErrors] = useState<string[]>([]);
+  const [workplaceFilter, setWorkplaceFilter] = useState<'all' | 'remote' | 'hybrid' | 'onsite'>('all');
 
   // Fetch Queue Items
   const loadQueue = useCallback(async () => {
@@ -103,13 +105,16 @@ export function ManualQueueView({ apiBase = '' }: Props): React.JSX.Element {
     };
   }, [apiBase, selectedId]);
 
-  // Filter list by active tab
+  // Filter list by active tab and workplace type
   const displayedItems = useMemo(() => {
     if (!data) return [];
-    if (activeTab === 'focus') return data.todays_focus;
-    if (activeTab === 'needs_attention') return data.needs_attention;
-    return data.items;
-  }, [data, activeTab]);
+    let list = data.items;
+    if (activeTab === 'focus') list = data.todays_focus;
+    else if (activeTab === 'needs_attention') list = data.needs_attention;
+
+    if (workplaceFilter === 'all') return list;
+    return list.filter((item) => getWorkplaceType(item) === workplaceFilter);
+  }, [data, activeTab, workplaceFilter]);
 
   // Actions
   const handleMarkApplied = useCallback(async () => {
@@ -444,38 +449,54 @@ export function ManualQueueView({ apiBase = '' }: Props): React.JSX.Element {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-2 border-b border-border overflow-x-auto scrollbar-none">
-        <button
-          onClick={() => setActiveTab('focus')}
-          className={`py-2 px-3 text-[13px] font-medium border-b-2 cursor-pointer transition-colors shrink-0 whitespace-nowrap ${
-            activeTab === 'focus'
-              ? 'border-accent text-fg font-semibold'
-              : 'border-transparent text-fg-muted hover:text-fg'
-          }`}
+      {/* Tabs & Workplace Filter */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border gap-2 pb-1">
+        <div className="flex gap-2 overflow-x-auto scrollbar-none">
+          <button
+            onClick={() => setActiveTab('focus')}
+            className={`py-2 px-3 text-[13px] font-medium border-b-2 cursor-pointer transition-colors shrink-0 whitespace-nowrap ${
+              activeTab === 'focus'
+                ? 'border-accent text-fg font-semibold'
+                : 'border-transparent text-fg-muted hover:text-fg'
+            }`}
+          >
+            Today's Focus ({data?.todays_focus.length ?? 0})
+          </button>
+          <button
+            onClick={() => setActiveTab('needs_attention')}
+            className={`py-2 px-3 text-[13px] font-medium border-b-2 cursor-pointer transition-colors shrink-0 whitespace-nowrap ${
+              activeTab === 'needs_attention'
+                ? 'border-accent text-fg font-semibold'
+                : 'border-transparent text-fg-muted hover:text-fg'
+            }`}
+          >
+            Needs Attention ({data?.needs_attention.length ?? 0})
+          </button>
+          <button
+            onClick={() => setActiveTab('all')}
+            className={`py-2 px-3 text-[13px] font-medium border-b-2 cursor-pointer transition-colors shrink-0 whitespace-nowrap ${
+              activeTab === 'all'
+                ? 'border-accent text-fg font-semibold'
+                : 'border-transparent text-fg-muted hover:text-fg'
+            }`}
+          >
+            All Active ({data?.items.length ?? 0})
+          </button>
+        </div>
+
+        <select
+          aria-label="Filter manual queue by workplace type"
+          value={workplaceFilter}
+          onChange={(e) =>
+            setWorkplaceFilter(e.target.value as 'all' | 'remote' | 'hybrid' | 'onsite')
+          }
+          className="text-[12px] px-2.5 py-1 rounded-[4px] border border-border bg-surface text-fg focus-visible:outline-none self-start sm:self-auto shrink-0 mb-1"
         >
-          Today's Focus ({data?.todays_focus.length ?? 0})
-        </button>
-        <button
-          onClick={() => setActiveTab('needs_attention')}
-          className={`py-2 px-3 text-[13px] font-medium border-b-2 cursor-pointer transition-colors shrink-0 whitespace-nowrap ${
-            activeTab === 'needs_attention'
-              ? 'border-accent text-fg font-semibold'
-              : 'border-transparent text-fg-muted hover:text-fg'
-          }`}
-        >
-          Needs Attention ({data?.needs_attention.length ?? 0})
-        </button>
-        <button
-          onClick={() => setActiveTab('all')}
-          className={`py-2 px-3 text-[13px] font-medium border-b-2 cursor-pointer transition-colors shrink-0 whitespace-nowrap ${
-            activeTab === 'all'
-              ? 'border-accent text-fg font-semibold'
-              : 'border-transparent text-fg-muted hover:text-fg'
-          }`}
-        >
-          All Active ({data?.items.length ?? 0})
-        </button>
+          <option value="all">All Workplaces</option>
+          <option value="remote">Remote Only</option>
+          <option value="hybrid">Hybrid Only</option>
+          <option value="onsite">On-site Only</option>
+        </select>
       </div>
 
       {/* Main Split: Queue List on Left, Kit Panel on Right */}
@@ -524,6 +545,7 @@ export function ManualQueueView({ apiBase = '' }: Props): React.JSX.Element {
                       <SourceLogo source={item.source} size="xs" />
                       <span>{getSourceDisplayName(item.source)}</span>
                     </span>
+                    <WorkplaceBadge type={getWorkplaceType(item)} />
                     {item.location && (
                       <span className="bg-surface-subtle text-fg-muted border border-border px-1.5 py-0.5 rounded-[4px]">
                         {item.location}
@@ -582,9 +604,11 @@ export function ManualQueueView({ apiBase = '' }: Props): React.JSX.Element {
                   <div>
                     <h3 className="text-[18px] font-semibold text-fg">{kit.title}</h3>
                     <p className="text-[14px] text-fg-muted font-medium">{kit.company}</p>
-                    <div className="flex items-center gap-1.5 text-[12px] text-fg-muted mt-1">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-fg-muted mt-1">
                       <SourceLogo source={kit.source} size="xs" />
                       <span>{getSourceDisplayName(kit.source)}</span>
+                      <span>•</span>
+                      <WorkplaceBadge type={getWorkplaceType(kit)} />
                       <span>
                         • Location: {kit.location || 'Not specified'} • Salary:{' '}
                         {kit.salary || 'Not specified'}

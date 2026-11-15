@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { AlertTriangle, Info, Loader2, Radio, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Building, Globe, Info, Loader2, Mail, Radio, RefreshCw, Zap } from 'lucide-react';
 import { Button } from './ui/Button.js';
 import { StatusChip } from './ui/StatusChip.js';
 import { SourceLogo, getSourceDisplayName } from './ui/SourceLogo.js';
@@ -130,6 +130,43 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
             <strong className="text-fg font-medium">Manual Apply</strong> for secure, one-click
             manual submission.
           </p>
+        </div>
+      </div>
+
+      {/* India & UAE Job Portals Guide */}
+      <div className="bg-surface p-4 sm:p-5 rounded-[6px] border border-border space-y-3">
+        <div className="flex items-center gap-2">
+          <Globe size={16} strokeWidth={1.5} className="text-accent shrink-0" aria-hidden="true" />
+          <h3 className="text-[14px] font-semibold text-fg">India & UAE Job Portals & Opportunities</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[12px] text-fg-muted">
+          <div className="p-3 bg-surface-subtle rounded-[6px] border border-border-subtle space-y-1.5">
+            <div className="font-semibold text-fg flex items-center gap-1.5">
+              <Mail size={13} className="text-accent" aria-hidden="true" />
+              <span>Email Alert Ingestion (India & UAE)</span>
+            </div>
+            <p className="leading-relaxed">
+              <strong>Naukri, Instahyre, Foundit, LinkedIn & Indeed</strong> alert digests are parsed automatically. Set up daily job alerts for your target roles in Bengaluru, Mumbai, Dubai, or UAE and forward them to your Pigeon email.
+            </p>
+          </div>
+          <div className="p-3 bg-surface-subtle rounded-[6px] border border-border-subtle space-y-1.5">
+            <div className="font-semibold text-fg flex items-center gap-1.5">
+              <Building size={13} className="text-accent" aria-hidden="true" />
+              <span>Top Tech ATS Connectors</span>
+            </div>
+            <p className="leading-relaxed">
+              Pigeon queries public ATS endpoints directly for leading tech firms in India (e.g. <strong>Meesho</strong> on Lever) and the UAE (e.g. <strong>Careem</strong> on Greenhouse). More company slugs can be enabled at any time.
+            </p>
+          </div>
+          <div className="p-3 bg-surface-subtle rounded-[6px] border border-border-subtle space-y-1.5">
+            <div className="font-semibold text-fg flex items-center gap-1.5">
+              <Zap size={13} className="text-accent" aria-hidden="true" />
+              <span>Adzuna India Public API</span>
+            </div>
+            <p className="leading-relaxed">
+              Adzuna provides an official public search API for jobs across India (<code className="font-mono text-[11px]">/jobs/in</code>). Add free API credentials in Settings &gt; Integrations to enable automatic syncing.
+            </p>
+          </div>
         </div>
       </div>
 

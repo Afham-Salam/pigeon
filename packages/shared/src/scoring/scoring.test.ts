@@ -345,6 +345,50 @@ describe('Phase 4: Rule Filters, Skip Checks, Scorer, and Router', () => {
       expect(res.passed).toBe(true);
     });
 
+    it('accepts hybrid and onsite jobs when workplace_type is all and location matches', () => {
+      const allProfile: Profile = {
+        ...mockProfile,
+        filters: {
+          ...mockProfile.filters,
+          workplace_type: 'all',
+          locations: ['Bengaluru', 'Dubai'],
+        },
+      };
+      const hybridRes = evaluateRuleFilters(
+        {
+          title: 'Senior Systems Engineer',
+          company: 'Acme Corp',
+          location: 'Bengaluru, India (Hybrid)',
+          remote: false,
+        },
+        allProfile,
+      );
+      expect(hybridRes.passed).toBe(true);
+
+      const onsiteRes = evaluateRuleFilters(
+        {
+          title: 'Senior Systems Engineer',
+          company: 'Acme Corp',
+          location: 'Dubai, UAE',
+          remote: false,
+        },
+        allProfile,
+      );
+      expect(onsiteRes.passed).toBe(true);
+
+      const mismatchRes = evaluateRuleFilters(
+        {
+          title: 'Senior Systems Engineer',
+          company: 'Acme Corp',
+          location: 'London, UK',
+          remote: false,
+        },
+        allProfile,
+      );
+      expect(mismatchRes.passed).toBe(false);
+      expect(mismatchRes.reason).toBe('LOCATION_MISMATCH');
+    });
+
     it('rejects on salary below minimum threshold (SALARY_LOW)', () => {
       const res = evaluateRuleFilters(
         {

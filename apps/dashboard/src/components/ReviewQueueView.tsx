@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/Button.js';
 import { StatusChip } from './ui/StatusChip.js';
+import { WorkplaceBadge, getWorkplaceType } from './ui/WorkplaceBadge.js';
 import { apiFetch } from '../api.js';
 
 export interface ReviewQueueItem {
@@ -27,6 +28,7 @@ export interface ReviewQueueItem {
   title: string;
   company: string;
   location: string | null;
+  remote?: boolean | number | null;
   salary_raw: string | null;
   description: string;
   apply_url: string | null;
@@ -63,6 +65,12 @@ export function ReviewQueueView({ apiBase = '', onActionComplete }: Props): Reac
   const [savingLetter, setSavingLetter] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<string | null>(null);
+  const [workplaceFilter, setWorkplaceFilter] = useState<'all' | 'remote' | 'hybrid' | 'onsite'>('all');
+
+  const displayedItems = useMemo(() => {
+    if (workplaceFilter === 'all') return items;
+    return items.filter((it) => getWorkplaceType(it) === workplaceFilter);
+  }, [items, workplaceFilter]);
 
   const loadData = useCallback(async () => {
     try {
@@ -369,11 +377,26 @@ export function ReviewQueueView({ apiBase = '', onActionComplete }: Props): Reac
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left Column: Item List */}
           <div className={`lg:col-span-4 space-y-2 ${mobileDetailOpen ? 'hidden lg:block' : 'block'}`}>
-            <h3 className="text-[12px] font-medium uppercase tracking-wider text-fg-muted px-1">
-              Applications ({items.length})
-            </h3>
+            <div className="flex items-center justify-between px-1">
+              <h3 className="text-[12px] font-medium uppercase tracking-wider text-fg-muted">
+                Applications ({displayedItems.length})
+              </h3>
+              <select
+                aria-label="Filter by workplace type"
+                value={workplaceFilter}
+                onChange={(e) =>
+                  setWorkplaceFilter(e.target.value as 'all' | 'remote' | 'hybrid' | 'onsite')
+                }
+                className="text-[11px] px-2 py-0.5 rounded-[4px] border border-border bg-surface text-fg focus-visible:outline-none"
+              >
+                <option value="all">All</option>
+                <option value="remote">Remote</option>
+                <option value="hybrid">Hybrid</option>
+                <option value="onsite">On-site</option>
+              </select>
+            </div>
             <div className="space-y-2 max-h-[700px] overflow-y-auto pr-1">
-              {items.map((it) => {
+              {displayedItems.map((it) => {
                 const isSelected = it.id === selectedId;
                 const isUntrusted = Boolean(it.untrusted);
                 return (
@@ -397,6 +420,12 @@ export function ReviewQueueView({ apiBase = '', onActionComplete }: Props): Reac
                     </div>
                     <div className="text-[13px] text-fg-muted truncate mt-0.5">{it.title}</div>
                     <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <WorkplaceBadge type={getWorkplaceType(it)} />
+                      {it.location && (
+                        <span className="text-[11px] text-fg-muted font-mono truncate max-w-[120px]">
+                          {it.location}
+                        </span>
+                      )}
                       {it.is_safe_for_bulk && (
                         <StatusChip variant="ok" label="Safe for bulk" size="sm" />
                       )}
@@ -448,9 +477,10 @@ export function ReviewQueueView({ apiBase = '', onActionComplete }: Props): Reac
               <div className="flex items-start justify-between border-b border-border pb-4">
                 <div>
                   <h3 className="text-[16px] font-semibold text-fg">{selectedItem.title}</h3>
-                  <div className="text-[13px] font-medium text-fg-muted mt-0.5">
-                    {selectedItem.company}{' '}
-                    {selectedItem.location ? `• ${selectedItem.location}` : ''}
+                  <div className="text-[13px] font-medium text-fg-muted mt-1 flex flex-wrap items-center gap-2">
+                    <span>{selectedItem.company}</span>
+                    <WorkplaceBadge type={getWorkplaceType(selectedItem)} />
+                    {selectedItem.location && <span>• {selectedItem.location}</span>}
                   </div>
                   <div className="text-[12px] text-fg-muted mt-1">
                     Contact:{' '}

@@ -19,10 +19,20 @@ export const EducationItemSchema = z.object({
   end_date: z.string().optional(),
 });
 
+export const WorkplaceTypeSchema = z.enum([
+  'all',
+  'remote',
+  'hybrid',
+  'remote_and_hybrid',
+  'onsite',
+]);
+export type WorkplaceType = z.infer<typeof WorkplaceTypeSchema>;
+
 export const PreferencesSchema = z
   .object({
     locations: z.array(z.string().max(200)).max(100).default([]),
     remote: z.boolean().default(true),
+    workplace_type: WorkplaceTypeSchema.optional(),
     roles: z.array(z.string().max(200)).max(100).optional(),
     manual_daily_target: z.number().int().min(1).optional(),
   })
@@ -35,6 +45,7 @@ export const FiltersSchema = z
     title_exclude: z.array(z.string().max(200)).max(100).optional(),
     locations: z.array(z.string().max(200)).max(100).default([]),
     remote: z.boolean().optional(),
+    workplace_type: WorkplaceTypeSchema.optional(),
     min_salary: z.number().nullable().optional(),
     experience_range: z
       .object({

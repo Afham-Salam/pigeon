@@ -16,7 +16,7 @@ export const leverAdapter: JobSource = {
     const userAgent =
       config?.userAgent || 'Pigeon/1.0 (Job Application Assistant; +https://github.com/pigeon)';
 
-    const slugs = await getAtsSlugs('lever', config, ['cloudflare']);
+    const slugs = await getAtsSlugs('lever', config, ['meesho']);
     const allJobs: RawJob[] = [];
     const failedSlugs: string[] = [];
 

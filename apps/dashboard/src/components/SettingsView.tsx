@@ -87,6 +87,10 @@ export function SettingsView({
   const [autoApproveScore, setAutoApproveScore] = useState(85);
   const [titleFiltersText, setTitleFiltersText] = useState('');
   const [companyBlacklistText, setCompanyBlacklistText] = useState('');
+  const [locationsText, setLocationsText] = useState('');
+  const [workplaceType, setWorkplaceType] = useState<
+    'all' | 'remote' | 'hybrid' | 'remote_and_hybrid' | 'onsite'
+  >('all');
 
   // Sync initialSubTab when parent changes it
   useEffect(() => {
@@ -161,6 +165,16 @@ export function SettingsView({
         setAutoApproveScore(data.profile.send_settings?.auto_approve_above_score ?? 85);
         setTitleFiltersText((data.profile.filters?.titles || []).join(', '));
         setCompanyBlacklistText((data.profile.filters?.company_blacklist || []).join(', '));
+        const locs =
+          data.profile.filters?.locations?.length
+            ? data.profile.filters.locations
+            : data.profile.preferences?.locations || [];
+        setLocationsText(locs.join(', '));
+        const wpType =
+          (data.profile.filters?.workplace_type as typeof workplaceType) ||
+          (data.profile.preferences?.workplace_type as typeof workplaceType) ||
+          (data.profile.filters?.remote === true ? 'remote' : 'all');
+        setWorkplaceType(wpType);
       }
     } catch (err) {
       setFeedback({
@@ -255,6 +269,10 @@ export function SettingsView({
         .split(',')
         .map((c) => c.trim())
         .filter(Boolean);
+      const locations = locationsText
+        .split(',')
+        .map((l) => l.trim())
+        .filter(Boolean);
 
       const payload = {
         name,
@@ -263,7 +281,12 @@ export function SettingsView({
         experience_years: profile?.experience_years,
         experience: profile?.experience || [],
         education: profile?.education || [],
-        preferences: profile?.preferences || {},
+        preferences: {
+          ...(profile?.preferences || {}),
+          locations,
+          workplace_type: workplaceType,
+          remote: workplaceType === 'remote',
+        },
         answers: profile?.answers || {
           notice_period: 'Immediate',
           current_ctc: 'N/A',
@@ -285,6 +308,9 @@ export function SettingsView({
         },
         filters: {
           titles,
+          locations,
+          workplace_type: workplaceType,
+          remote: workplaceType === 'remote',
           company_blacklist: companyBlacklist,
           min_score: Number(minScore),
         },
@@ -533,6 +559,48 @@ export function SettingsView({
                 placeholder="Software Engineer, Backend Developer"
                 className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               />
+            </div>
+
+            <div>
+              <label
+                htmlFor="locations-filter-input"
+                className="block text-[12px] font-medium uppercase tracking-wider text-fg-muted mb-1.5"
+              >
+                Target Locations (comma-separated, e.g. India, Bengaluru, Dubai, UAE, Remote)
+              </label>
+              <input
+                id="locations-filter-input"
+                type="text"
+                value={locationsText}
+                onChange={(e) => setLocationsText(e.target.value)}
+                placeholder="India, Bengaluru, Dubai, UAE, Remote"
+                className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="workplace-type-select"
+                className="block text-[12px] font-medium uppercase tracking-wider text-fg-muted mb-1.5"
+              >
+                Workplace Preference
+              </label>
+              <select
+                id="workplace-type-select"
+                value={workplaceType}
+                onChange={(e) =>
+                  setWorkplaceType(
+                    e.target.value as 'all' | 'remote' | 'hybrid' | 'remote_and_hybrid' | 'onsite',
+                  )
+                }
+                className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                <option value="all">All Opportunities (Remote, Hybrid & On-site)</option>
+                <option value="remote_and_hybrid">Remote & Hybrid Only</option>
+                <option value="remote">Remote Only</option>
+                <option value="hybrid">Hybrid Only</option>
+                <option value="onsite">On-site Only</option>
+              </select>
             </div>
 
             <div>

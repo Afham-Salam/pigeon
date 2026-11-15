@@ -46,6 +46,8 @@ export function OverviewView({
   const [targetKsState, setTargetKsState] = useState(false);
   const [showDryRunModal, setShowDryRunModal] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [pipelineRunning, setPipelineRunning] = useState(false);
+  const [pipelineResult, setPipelineResult] = useState<string | null>(null);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -121,6 +123,42 @@ export function OverviewView({
       alert(err instanceof Error ? err.message : String(err));
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleRunPipeline = async () => {
+    try {
+      setPipelineRunning(true);
+      setPipelineResult(null);
+      const res = await apiFetch(`${apiBase}/api/pipeline/run`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const errJson = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errJson.error || `Pipeline failed (${res.status})`);
+      }
+      const json = (await res.json()) as {
+        ok: boolean;
+        stats?: {
+          processed: number;
+          routed: number;
+          filtered_out: number;
+          low_score_skipped: number;
+        };
+      };
+      if (json.stats) {
+        setPipelineResult(
+          `Processed ${json.stats.processed} jobs: ${json.stats.routed} routed, ${json.stats.filtered_out} filtered, ${json.stats.low_score_skipped} skipped low score.`,
+        );
+      } else {
+        setPipelineResult('Pipeline run complete.');
+      }
+      await loadOverview();
+      onDataRefresh?.();
+    } catch (err) {
+      setPipelineResult(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPipelineRunning(false);
     }
   };
 
@@ -338,9 +376,26 @@ export function OverviewView({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
         {/* Jobs by Status */}
         <div className="bg-surface p-5 rounded-[6px] border border-border">
-          <h3 className="text-[12px] font-medium uppercase tracking-wider text-fg-muted mb-3">
-            Jobs by Status
-          </h3>
+          <div className="flex items-center justify-between gap-2 mb-3">
+            <h3 className="text-[12px] font-medium uppercase tracking-wider text-fg-muted">
+              Jobs by Status
+            </h3>
+            {data.jobsByStatus['new'] ? (
+              <Button
+                variant="secondary"
+                size="xs"
+                loading={pipelineRunning}
+                onClick={() => void handleRunPipeline()}
+              >
+                Score New Jobs ({data.jobsByStatus['new']})
+              </Button>
+            ) : null}
+          </div>
+          {pipelineResult && (
+            <div className="mb-3 p-2.5 rounded-[4px] bg-surface-subtle border border-border text-[12px] text-fg">
+              {pipelineResult}
+            </div>
+          )}
           <div className="space-y-1.5">
             {Object.keys(data.jobsByStatus).length === 0 ? (
               <p className="text-[13px] text-fg-muted py-2">No jobs ingested yet.</p>

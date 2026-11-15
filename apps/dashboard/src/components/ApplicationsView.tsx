@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { FolderX, Layers, Loader2, Search } from 'lucide-react';
 import { Button } from './ui/Button.js';
 import { StatusChip } from './ui/StatusChip.js';
 import { SourceLogo, getSourceDisplayName } from './ui/SourceLogo.js';
+import { WorkplaceBadge, getWorkplaceType } from './ui/WorkplaceBadge.js';
 import { apiFetch } from '../api.js';
 
 export interface ApplicationItem {
@@ -23,6 +24,7 @@ export interface ApplicationItem {
   company: string;
   source: string;
   location: string | null;
+  remote?: boolean | number | null;
   match_score: number | null;
   contact_email: string | null;
   apply_url: string | null;
@@ -42,6 +44,7 @@ export function ApplicationsView({ apiBase = '' }: Props): React.JSX.Element {
   const [statusFilter, setStatusFilter] = useState('');
   const [channelFilter, setChannelFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
+  const [workplaceFilter, setWorkplaceFilter] = useState<'all' | 'remote' | 'hybrid' | 'onsite'>('all');
 
   // Outcome modal state
   const [selectedApp, setSelectedApp] = useState<ApplicationItem | null>(null);
@@ -80,6 +83,11 @@ export function ApplicationsView({ apiBase = '' }: Props): React.JSX.Element {
     }, 200);
     return () => clearTimeout(timer);
   }, [loadApplications]);
+
+  const displayedApps = useMemo(() => {
+    if (workplaceFilter === 'all') return apps;
+    return apps.filter((app) => getWorkplaceType(app) === workplaceFilter);
+  }, [apps, workplaceFilter]);
 
   const handleRecordOutcome = async () => {
     if (!selectedApp) return;
@@ -129,7 +137,7 @@ export function ApplicationsView({ apiBase = '' }: Props): React.JSX.Element {
         </div>
 
         {/* Filter Inputs Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           <div className="relative">
             <Search
               size={14}
@@ -146,6 +154,20 @@ export function ApplicationsView({ apiBase = '' }: Props): React.JSX.Element {
               className="w-full text-[13px] pl-8 pr-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             />
           </div>
+
+          <select
+            aria-label="Filter by workplace type"
+            value={workplaceFilter}
+            onChange={(e) =>
+              setWorkplaceFilter(e.target.value as 'all' | 'remote' | 'hybrid' | 'onsite')
+            }
+            className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          >
+            <option value="all">All Workplaces</option>
+            <option value="remote">Remote Only</option>
+            <option value="hybrid">Hybrid Only</option>
+            <option value="onsite">On-site Only</option>
+          </select>
 
           <select
             aria-label="Filter by application status"
@@ -230,7 +252,7 @@ export function ApplicationsView({ apiBase = '' }: Props): React.JSX.Element {
           </div>
         ) : error ? (
           <div className="p-4 bg-state-danger-bg text-state-danger-fg text-[13px]">{error}</div>
-        ) : apps.length === 0 ? (
+        ) : displayedApps.length === 0 ? (
           <div className="p-12 text-center">
             <FolderX
               size={24}
@@ -247,15 +269,18 @@ export function ApplicationsView({ apiBase = '' }: Props): React.JSX.Element {
           <>
             {/* Mobile Cards List (< md) */}
             <div className="md:hidden divide-y divide-border">
-              {apps.map((app) => (
+              {displayedApps.map((app) => (
                 <div key={app.id} className="p-4 space-y-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="font-semibold text-fg text-[14px] truncate">{app.company}</div>
                       <div className="text-[13px] text-fg-muted truncate">{app.title}</div>
-                      {app.location && (
-                        <div className="text-[11px] text-fg-muted font-mono mt-0.5">{app.location}</div>
-                      )}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <WorkplaceBadge type={getWorkplaceType(app)} />
+                        {app.location && (
+                          <span className="text-[11px] text-fg-muted font-mono truncate">{app.location}</span>
+                        )}
+                      </div>
                     </div>
                     <StatusChip status={app.status} size="sm" />
                   </div>
@@ -298,6 +323,7 @@ export function ApplicationsView({ apiBase = '' }: Props): React.JSX.Element {
                 <thead className="sticky top-0 bg-surface-subtle border-b border-border z-10">
                   <tr className="text-fg-muted uppercase text-[11px] font-medium tracking-wider">
                     <th className="py-2.5 px-4">Company & Role</th>
+                    <th className="py-2.5 px-4">Workplace</th>
                     <th className="py-2.5 px-4">Channel</th>
                     <th className="py-2.5 px-4">Source</th>
                     <th className="py-2.5 px-4">Score</th>
@@ -307,7 +333,7 @@ export function ApplicationsView({ apiBase = '' }: Props): React.JSX.Element {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border-subtle">
-                  {apps.map((app) => (
+                  {displayedApps.map((app) => (
                     <tr key={app.id} className="hover:bg-surface-subtle/50 transition-colors">
                       <td className="py-2.5 px-4">
                         <div className="font-semibold text-fg">{app.company}</div>
@@ -315,6 +341,10 @@ export function ApplicationsView({ apiBase = '' }: Props): React.JSX.Element {
                         {app.location && (
                           <div className="text-[11px] text-fg-muted font-mono">{app.location}</div>
                         )}
+                      </td>
+
+                      <td className="py-2.5 px-4">
+                        <WorkplaceBadge type={getWorkplaceType(app)} />
                       </td>
 
                       <td className="py-2.5 px-4">
