@@ -31,6 +31,36 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<FilterKind>('all');
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [resetting, setResetting] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+
+  const openCircuitsCount = useMemo(
+    () => sources.filter((s) => s.circuit_state === 'open').length,
+    [sources],
+  );
+
+  const handleResetCircuits = async () => {
+    try {
+      setResetting(true);
+      setError(null);
+      setResetSuccess(null);
+      const res = await apiFetch(`${apiBase}/api/sources/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: 'all' }),
+      });
+      if (!res.ok) {
+        throw new Error(`Failed to reset circuits (${res.status})`);
+      }
+      setResetSuccess('Tripped circuit breakers have been reset to closed.');
+      await loadSources();
+      setTimeout(() => setResetSuccess(null), 4000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const loadSources = useCallback(async () => {
     try {
@@ -89,7 +119,19 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
           </p>
         </div>
 
-        <div className="flex flex-col sm:items-end gap-1.5 self-start sm:self-auto shrink-0">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 self-start sm:self-auto shrink-0">
+          {openCircuitsCount > 0 && (
+            <Button
+              variant="primary"
+              size="sm"
+              icon={Zap}
+              loading={resetting}
+              onClick={() => void handleResetCircuits()}
+              className="w-full sm:w-auto"
+            >
+              {resetting ? 'Resetting...' : `Reset Tripped Circuits (${openCircuitsCount})`}
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -101,12 +143,18 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
             {loading ? 'Refreshing...' : 'Refresh Status'}
           </Button>
           {lastRefreshed && (
-            <span className="text-[11px] text-fg-muted font-mono">
+            <span className="text-[11px] text-fg-muted font-mono hidden sm:inline">
               Updated {lastRefreshed.toLocaleTimeString()}
             </span>
           )}
         </div>
       </div>
+
+      {resetSuccess && (
+        <div className="p-3 bg-state-success-bg border border-state-success-border text-state-success-fg text-[13px] rounded-[6px]">
+          {resetSuccess}
+        </div>
+      )}
 
       {/* Safety & Portal Policy Notice */}
       <div className="bg-surface-subtle border border-border rounded-[6px] p-4 flex items-start gap-3 text-[13px]">

@@ -38,7 +38,14 @@ export function EventsView({ apiBase = '' }: Props): React.JSX.Element {
 
       const res = await apiFetch(`${apiBase}/api/events?${params.toString()}`);
       if (!res.ok) {
-        throw new Error(`Failed to load events (${res.status})`);
+        let errorMsg = `Failed to load events (${res.status})`;
+        try {
+          const errData = (await res.json()) as { error?: string };
+          if (errData && errData.error) errorMsg += `: ${errData.error}`;
+        } catch {
+          // ignore
+        }
+        throw new Error(errorMsg);
       }
       const data = (await res.json()) as { ok: boolean; events: AuditEventItem[] };
       setEvents(data.events || []);
@@ -114,7 +121,12 @@ export function EventsView({ apiBase = '' }: Props): React.JSX.Element {
             <span>Loading audit events...</span>
           </div>
         ) : error ? (
-          <div className="p-4 bg-state-danger-bg text-state-danger-fg text-[13px]">{error}</div>
+          <div className="p-4 bg-state-danger-bg text-state-danger-fg text-[13px] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <span>{error}</span>
+            <Button variant="secondary" size="xs" onClick={() => void loadEvents()}>
+              Try Again
+            </Button>
+          </div>
         ) : events.length === 0 ? (
           <div className="p-12 text-center text-[13px] text-fg-muted">
             No events found matching your filter.

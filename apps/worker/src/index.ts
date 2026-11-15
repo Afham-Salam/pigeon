@@ -84,13 +84,67 @@ type Variables = {
 
 export const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-// Global error handler returns JSON {error:string} with no stack traces
+/**
+ * Applies standard CORS response headers for authorized Pigeon dashboard origins.
+ */
+export function applyCorsHeaders(c: Context<{ Bindings: Bindings; Variables: Variables }>): boolean {
+  const origin = c.req.header('origin') || '';
+  const dashboardOrigin = c.env?.DASHBOARD_ORIGIN || 'http://localhost:5173';
+
+  let isHostMatch = false;
+  let isPagesDevMatch = false;
+  try {
+    if (origin) {
+      const parsedOrigin = new URL(origin);
+      isHostMatch = parsedOrigin.host === new URL(c.req.url).host;
+      isPagesDevMatch =
+        parsedOrigin.protocol === 'https:' &&
+        (parsedOrigin.hostname === 'pigeon-dashboard.pages.dev' ||
+          parsedOrigin.hostname.endsWith('.pigeon-dashboard.pages.dev'));
+    }
+  } catch {
+    isHostMatch = false;
+    isPagesDevMatch = false;
+  }
+
+  const allowedOrigins = [
+    dashboardOrigin,
+    'https://pigeon-dashboard.pages.dev',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:3000',
+  ];
+  const isAllowedOrigin = origin
+    ? allowedOrigins.includes(origin) || isHostMatch || isPagesDevMatch
+    : false;
+
+  if (origin && isAllowedOrigin) {
+    c.header('Access-Control-Allow-Origin', origin);
+    c.header('Access-Control-Allow-Credentials', 'true');
+    c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    c.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  }
+  return isAllowedOrigin;
+}
+
+// 1. CORS Middleware - executes first on every request & preflight
+app.use('*', async (c, next) => {
+  applyCorsHeaders(c);
+  if (c.req.method === 'OPTIONS') {
+    return c.body(null, 204);
+  }
+  await next();
+});
+
+// 2. Global error handler returns JSON {error:string} with CORS headers attached
 app.onError((err, c) => {
+  applyCorsHeaders(c);
   return c.json({ error: err.message || 'Internal Server Error' }, 500);
 });
 
-// Unknown route returns JSON 404
+// 3. Unknown route returns JSON 404 with CORS headers attached
 app.notFound((c) => {
+  applyCorsHeaders(c);
   return c.json({ error: 'Not Found' }, 404);
 });
 
@@ -175,51 +229,13 @@ export async function verifyAdminPassword(provided: string, expected: string): P
 }
 
 // -------------------------------------------------------------
-// Security Middleware: CORS, State-Changing Requests, Owner Token Auth
+// Security Middleware: Origin Verification & Owner Token Auth
 // -------------------------------------------------------------
 app.use('*', async (c, next) => {
   const origin = c.req.header('origin') || '';
-  const dashboardOrigin = (c.env.DASHBOARD_ORIGIN as string) || 'http://localhost:5173';
+  const isAllowedOrigin = applyCorsHeaders(c);
 
-  // Allowed origins: dashboardOrigin, localhost dev/test origins, or matching request host
-  let isHostMatch = false;
-  let isPagesDevMatch = false;
-  try {
-    if (origin) {
-      const parsedOrigin = new URL(origin);
-      isHostMatch = parsedOrigin.host === new URL(c.req.url).host;
-      isPagesDevMatch =
-        parsedOrigin.protocol === 'https:' &&
-        (parsedOrigin.hostname === 'pigeon-dashboard.pages.dev' ||
-          parsedOrigin.hostname.endsWith('.pigeon-dashboard.pages.dev'));
-    }
-  } catch {
-    isHostMatch = false;
-    isPagesDevMatch = false;
-  }
-
-  const allowedOrigins = [
-    dashboardOrigin,
-    'https://pigeon-dashboard.pages.dev',
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'http://localhost:3000',
-  ];
-  const isAllowedOrigin = origin
-    ? allowedOrigins.includes(origin) || isHostMatch || isPagesDevMatch
-    : false;
-
-  if (origin && isAllowedOrigin) {
-    c.header('Access-Control-Allow-Origin', origin);
-    c.header('Access-Control-Allow-Credentials', 'true');
-    c.header('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    c.header(
-      'Access-Control-Allow-Headers',
-      'Content-Type, Authorization',
-    );
-  }
-
-  // Preflight
+  // Preflight handled in early CORS middleware
   if (c.req.method === 'OPTIONS') {
     return c.body(null, 204);
   }
@@ -960,68 +976,88 @@ app.put('/api/profile', async (c) => {
 
 // GET /api/events with search & filters
 app.get('/api/events', async (c) => {
-  const entity = c.req.query('entity') || null;
-  const entityId = c.req.query('entity_id') || null;
-  const type = c.req.query('type') || null;
-  const search = c.req.query('search') || null;
-  const limitParam = parseInt(c.req.query('limit') || '50', 10);
-  const limit = Math.min(Math.max(1, isNaN(limitParam) ? 50 : limitParam), 200);
-  const offsetParam = parseInt(c.req.query('offset') || '0', 10);
-  const offset = Math.max(0, isNaN(offsetParam) ? 0 : offsetParam);
+  try {
+    const entity = c.req.query('entity') || null;
+    const entityId = c.req.query('entity_id') || null;
+    const type = c.req.query('type') || null;
+    const search = c.req.query('search') || null;
+    const limitParam = parseInt(c.req.query('limit') || '50', 10);
+    const limit = Math.min(Math.max(1, isNaN(limitParam) ? 50 : limitParam), 200);
+    const offsetParam = parseInt(c.req.query('offset') || '0', 10);
+    const offset = Math.max(0, isNaN(offsetParam) ? 0 : offsetParam);
 
-  const conditions: string[] = [];
-  const params: unknown[] = [];
+    const conditions: string[] = [];
+    const params: unknown[] = [];
 
-  if (entity) {
-    conditions.push('entity = ?');
-    params.push(entity);
-  }
-  if (entityId) {
-    conditions.push('entity_id = ?');
-    params.push(entityId);
-  }
-  if (type) {
-    conditions.push('type = ?');
-    params.push(type);
-  }
-  if (search) {
-    const searchPattern = `%${search.toLowerCase()}%`;
-    conditions.push('(LOWER(entity_id) LIKE ? OR LOWER(type) LIKE ? OR LOWER(payload) LIKE ?)');
-    params.push(searchPattern, searchPattern, searchPattern);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const query = `SELECT id, entity, entity_id, type, payload, created_at FROM events ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-  params.push(limit, offset);
-
-  const stmt = c.env.DB.prepare(query);
-  const { results } = await stmt.bind(...params).all<{
-    id: string;
-    entity: string;
-    entity_id: string;
-    type: string;
-    payload: string;
-    created_at: string;
-  }>();
-
-  const formattedEvents = (results || []).map((row) => {
-    let parsedPayload: unknown;
-    try {
-      parsedPayload = JSON.parse(row.payload);
-    } catch {
-      parsedPayload = row.payload;
+    if (entity) {
+      conditions.push('entity = ?');
+      params.push(entity);
     }
-    return {
-      id: row.id,
-      entity: row.entity,
-      entity_id: row.entity_id,
-      type: row.type,
-      payload: parsedPayload,
-      created_at: row.created_at,
-    };
-  });
+    if (entityId) {
+      conditions.push('entity_id = ?');
+      params.push(entityId);
+    }
+    if (type) {
+      conditions.push('type = ?');
+      params.push(type);
+    }
+    if (search) {
+      const searchPattern = `%${search.toLowerCase()}%`;
+      conditions.push('(LOWER(entity_id) LIKE ? OR LOWER(type) LIKE ? OR LOWER(payload) LIKE ?)');
+      params.push(searchPattern, searchPattern, searchPattern);
+    }
 
-  return c.json({ ok: true, events: formattedEvents });
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const query = `SELECT id, entity, entity_id, type, payload, created_at FROM events ${whereClause} ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`;
+
+    const stmt = c.env.DB.prepare(query);
+    const { results } =
+      params.length > 0
+        ? await stmt.bind(...params).all<{
+            id: string;
+            entity: string;
+            entity_id: string;
+            type: string;
+            payload: string;
+            created_at: string;
+          }>()
+        : await stmt.all<{
+            id: string;
+            entity: string;
+            entity_id: string;
+            type: string;
+            payload: string;
+            created_at: string;
+          }>();
+
+    const formattedEvents = (results || []).map((row) => {
+      let parsedPayload: unknown;
+      try {
+        parsedPayload = JSON.parse(row.payload);
+      } catch {
+        parsedPayload = row.payload;
+      }
+      return {
+        id: row.id,
+        entity: row.entity,
+        entity_id: row.entity_id,
+        type: row.type,
+        payload: parsedPayload,
+        created_at: row.created_at,
+      };
+    });
+
+    return c.json({ ok: true, events: formattedEvents });
+  } catch (err) {
+    return c.json(
+      {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        events: [],
+      },
+      500,
+    );
+  }
 });
 
 // POST /api/pipeline/run: Runs the Phase 4 scoring and routing pipeline on 'new' jobs
@@ -2203,6 +2239,23 @@ app.get('/api/sources', async (c) => {
   return c.json({ sources: sourceItems });
 });
 
+// POST /api/sources/reset: Reset tripped circuit breakers to closed
+app.post('/api/sources/reset', async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { source?: string };
+  if (body?.source && body.source !== 'all') {
+    await c.env.DB.prepare(
+      `UPDATE source_state SET circuit_state = 'closed', consecutive_failures = 0, opened_at = NULL, last_error = NULL WHERE source = ?`,
+    )
+      .bind(body.source)
+      .run();
+  } else {
+    await c.env.DB.prepare(
+      `UPDATE source_state SET circuit_state = 'closed', consecutive_failures = 0, opened_at = NULL, last_error = NULL WHERE circuit_state = 'open'`,
+    ).run();
+  }
+  return c.json({ ok: true, message: 'Circuit breakers reset successfully' });
+});
+
 // 8. GET /api/settings: Profile, Dry Run, Kill Switch, Resumes
 app.get('/api/settings', async (c) => {
   const env = c.get('validatedEnv');
@@ -2626,15 +2679,30 @@ app.post('/api/settings/test/:target', async (c) => {
               getValidAccessToken({ config: c.env.CONFIG, secrets, notifier }),
             );
             const meta = await sheetsClient.getSpreadsheet(spreadsheetId);
-            const tabExists = meta.sheets.some(
+            let tabExists = meta.sheets.some(
               (s) => s.properties.title === tabApplications,
             );
+            let tabCreated = false;
+            if (!tabExists) {
+              try {
+                await sheetsClient.ensureSheet({
+                  spreadsheetId,
+                  tabName: tabApplications,
+                });
+                tabExists = true;
+                tabCreated = true;
+              } catch {
+                // If auto-creating tab fails (e.g. read-only permissions), tabExists stays false
+              }
+            }
             result = {
               ok: true,
               code: 'ok',
-              message: tabExists
-                ? `Connected to spreadsheet "${meta.properties.title}" (tab "${tabApplications}" found)`
-                : `Connected to spreadsheet "${meta.properties.title}", but tab "${tabApplications}" was not found`,
+              message: tabCreated
+                ? `Connected to spreadsheet "${meta.properties.title}" (created tab "${tabApplications}" with standard headers)`
+                : tabExists
+                  ? `Connected to spreadsheet "${meta.properties.title}" (tab "${tabApplications}" found and verified)`
+                  : `Connected to spreadsheet "${meta.properties.title}", but tab "${tabApplications}" was not found`,
               title: meta.properties.title,
               tabExists,
             };

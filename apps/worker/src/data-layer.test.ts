@@ -655,5 +655,54 @@ describe('Pigeon Data Layer & Schema Tests', () => {
       const jsonNone = await resNone.json<{ ok: boolean; events: unknown[] }>();
       expect(jsonNone.events.length).toBe(0);
     });
+
+    it('returns CORS headers for cross-origin dashboard requests', async () => {
+      const res = await app.request(
+        '/api/events?limit=5',
+        {
+          method: 'GET',
+          headers: {
+            Origin: 'https://pigeon-dashboard.pages.dev',
+          },
+        },
+        workerEnv,
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Access-Control-Allow-Origin')).toBe(
+        'https://pigeon-dashboard.pages.dev',
+      );
+    });
+
+    it('resets open circuit breakers via POST /api/sources/reset', async () => {
+      const nowIso = new Date().toISOString();
+      await workerEnv.DB.prepare(
+        `INSERT OR REPLACE INTO source_state (source, consecutive_failures, circuit_state, opened_at, last_error)
+         VALUES ('weworkremotely', 8, 'open', ?, 'Mock circuit failure')`,
+      )
+        .bind(nowIso)
+        .run();
+
+      const resReset = await app.request(
+        '/api/sources/reset',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Origin: 'https://pigeon-dashboard.pages.dev',
+          },
+          body: JSON.stringify({ source: 'weworkremotely' }),
+        },
+        workerEnv,
+      );
+      expect(resReset.status).toBe(200);
+
+      const stateRow = await workerEnv.DB.prepare(
+        `SELECT circuit_state, consecutive_failures, last_error FROM source_state WHERE source = 'weworkremotely'`,
+      ).first<{ circuit_state: string; consecutive_failures: number; last_error: string | null }>();
+
+      expect(stateRow?.circuit_state).toBe('closed');
+      expect(stateRow?.consecutive_failures).toBe(0);
+      expect(stateRow?.last_error).toBeNull();
+    });
   });
 });
