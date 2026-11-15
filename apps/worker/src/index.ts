@@ -293,6 +293,25 @@ app.use('*', async (c, next) => {
         }
       }
 
+      // Allow ?token= query parameter for /auth/* browser navigations
+      if (!token && path.startsWith('/auth')) {
+        const queryToken = c.req.query('token')?.trim();
+        if (queryToken) {
+          token = queryToken;
+        }
+      }
+
+      // For /auth/google/callback, accept if valid oauth_state exists in KV
+      if (!token && path === '/auth/google/callback') {
+        const callbackState = c.req.query('state');
+        if (callbackState) {
+          const storedState = await c.env.CONFIG.get(`oauth_state:${callbackState}`);
+          if (storedState === 'valid') {
+            token = adminPassword;
+          }
+        }
+      }
+
       if (!token) {
         return c.json({ error: 'Unauthorized: Missing Authorization header' }, 401);
       }
@@ -1351,6 +1370,17 @@ app.get('/auth/google/start', async (c) => {
     redirectUri,
     state,
   });
+
+  const adminPassword =
+    typeof c.env.ADMIN_PASSWORD === 'string' && c.env.ADMIN_PASSWORD.length > 0
+      ? c.env.ADMIN_PASSWORD
+      : undefined;
+  if (adminPassword) {
+    c.header(
+      'Set-Cookie',
+      `pigeon_token=${encodeURIComponent(adminPassword)}; Path=/auth; Secure; HttpOnly; SameSite=Lax; Max-Age=600`,
+    );
+  }
 
   return c.redirect(authUrl, 302);
 });

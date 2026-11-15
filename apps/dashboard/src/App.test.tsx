@@ -7,6 +7,37 @@ import { App } from './App.js';
 // @ts-expect-error global IS_REACT_ACT_ENVIRONMENT flag
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
+// Polyfill localStorage for Node 22+ happy-dom compatibility
+if (!globalThis.localStorage || typeof globalThis.localStorage.setItem !== 'function') {
+  let store: Record<string, string> = {};
+  const mockStorage = {
+    getItem: (key: string) => store[key] ?? null,
+    setItem: (key: string, val: string) => {
+      store[key] = String(val);
+    },
+    removeItem: (key: string) => {
+      Reflect.deleteProperty(store, key);
+    },
+    clear: () => {
+      store = {};
+    },
+    get length() {
+      return Object.keys(store).length;
+    },
+    key: (i: number) => Object.keys(store)[i] ?? null,
+  };
+  Object.defineProperty(globalThis, 'localStorage', {
+    value: mockStorage,
+    configurable: true,
+    writable: true,
+  });
+  Object.defineProperty(window, 'localStorage', {
+    value: mockStorage,
+    configurable: true,
+    writable: true,
+  });
+}
+
 describe('Dashboard App & Operations Components', () => {
   let container: HTMLDivElement | null = null;
   let root: ReturnType<typeof createRoot> | null = null;

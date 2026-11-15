@@ -105,3 +105,13 @@ export async function apiFetch(
 
   return response;
 }
+
+/**
+ * Builds the Google OAuth start URL with the current stored admin token (if present)
+ * so that browser-level navigation to /auth/google/start passes owner authentication.
+ */
+export function getGoogleAuthStartUrl(apiBase = ''): string {
+  const token = getStoredToken();
+  const base = `${apiBase}/auth/google/start`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}

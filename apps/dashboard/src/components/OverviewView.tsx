@@ -4,7 +4,7 @@ import { ConfirmationModal } from './ConfirmationModal.js';
 import { AlertBanner } from './ui/AlertBanner.js';
 import { MetricCard } from './ui/MetricCard.js';
 import { Button } from './ui/Button.js';
-import { apiFetch } from '../api.js';
+import { apiFetch, getGoogleAuthStartUrl } from '../api.js';
 
 interface OverviewData {
   sendsToday: number;
@@ -198,7 +198,7 @@ export function OverviewView({
         }
         action={
           <a
-            href={`${apiBase}/auth/google/start`}
+            href={getGoogleAuthStartUrl(apiBase)}
             className={`inline-flex items-center justify-center font-medium rounded-[6px] h-7 px-2.5 text-[13px] transition-colors ${
               isAuthInvalid
                 ? 'bg-state-danger-bg text-state-danger-fg border border-state-danger-border hover:opacity-90'

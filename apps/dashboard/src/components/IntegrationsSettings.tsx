@@ -18,7 +18,7 @@ import { Button } from './ui/Button.js';
 import { StatusChip } from './ui/StatusChip.js';
 import { SecretSettingField } from './SecretSettingField.js';
 import { ConfirmationModal } from './ConfirmationModal.js';
-import { apiFetch } from '../api.js';
+import { apiFetch, getGoogleAuthStartUrl } from '../api.js';
 
 interface Props {
   apiBase?: string;
@@ -638,7 +638,7 @@ export function IntegrationsSettings({
               variant="secondary"
               size="sm"
               onClick={() => {
-                window.location.href = `${apiBase}/auth/google/start`;
+                window.location.href = getGoogleAuthStartUrl(apiBase);
               }}
               disabled={disabled}
               className="w-full sm:w-auto"

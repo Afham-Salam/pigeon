@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { Button } from './ui/Button.js';
 import { StatusChip } from './ui/StatusChip.js';
-import { apiFetch } from '../api.js';
+import { apiFetch, getGoogleAuthStartUrl } from '../api.js';
 
 export interface SetupItem {
   id: string;
@@ -100,7 +100,7 @@ export function SetupView({ apiBase = '', onNavigateTab }: Props): React.JSX.Ele
               variant="primary"
               size="sm"
               onClick={() => {
-                window.location.href = `${apiBase}/auth/google/start`;
+                window.location.href = getGoogleAuthStartUrl(apiBase);
               }}
             >
               Connect Google Account
