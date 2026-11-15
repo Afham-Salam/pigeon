@@ -3364,6 +3364,15 @@ export default {
     await sendManualDailyDigest({ db: env.DB, notifier });
     await checkFailureRateAlert({ db: env.DB, notifier });
 
+    // Score and route pending jobs on the 10-minute cron trigger (*/10 * * * *)
+    if (_event.cron === '*/10 * * * *') {
+      try {
+        await env.JOBS_QUEUE.send({ action: 'score_and_route' });
+      } catch (err) {
+        logger.error('Error enqueuing scheduled score_and_route', err);
+      }
+    }
+
     const hasGoogleOAuth = appConfig.hasGoogleOAuth();
 
     // Sync to Google Sheet every cron run (10 min) if OAuth configured

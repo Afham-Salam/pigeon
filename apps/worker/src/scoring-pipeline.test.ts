@@ -328,4 +328,28 @@ describe('Worker Scoring & Routing Pipeline Integration', () => {
 
     expect(ackCalled).toBe(true);
   });
+
+  it('enqueues score_and_route message when cron is */10 * * * *', async () => {
+    const enqueued: unknown[] = [];
+    const mockQueue = {
+      async send(msg: unknown) {
+        enqueued.push(msg);
+      },
+    } as unknown as Queue;
+
+    const mockEvent = {
+      cron: '*/10 * * * *',
+      scheduledTime: Date.now(),
+      noRetry() {},
+    } as unknown as ScheduledEvent;
+
+    await worker.scheduled(mockEvent, {
+      ...workerEnv,
+      JOBS_QUEUE: mockQueue,
+    });
+
+    expect(enqueued.some((m) => (m as { action?: string })?.action === 'score_and_route')).toBe(
+      true,
+    );
+  });
 });
