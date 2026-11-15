@@ -86,7 +86,7 @@ max_batch_timeout = 5
 
 [env.prod]
 name = "pigeon-worker-prod"
-vars = { ENV = "prod", DRY_RUN = "true", DEV_RECIPIENT_ALLOWLIST = "" }
+vars = { ENV = "prod", DRY_RUN = "false", DEV_RECIPIENT_ALLOWLIST = "" }
 
 [env.prod.ai]
 binding = "AI"
