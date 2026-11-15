@@ -239,7 +239,7 @@ describe('Dashboard App & Operations Components', () => {
           });
         }
 
-        if (u.includes('/api/events')) {
+        if (u.includes('/api/events') || u.includes('/api/audit-logs')) {
           return Promise.resolve({
             ok: true,
             status: 200,

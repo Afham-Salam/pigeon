@@ -36,7 +36,13 @@ export function EventsView({ apiBase = '' }: Props): React.JSX.Element {
       if (entityFilter) params.set('entity', entityFilter);
       if (typeFilter) params.set('type', typeFilter);
 
-      const res = await apiFetch(`${apiBase}/api/events?${params.toString()}`);
+      let res: Response;
+      try {
+        res = await apiFetch(`${apiBase}/api/audit-logs?${params.toString()}`);
+      } catch {
+        // Fallback to /api/events if /api/audit-logs fails
+        res = await apiFetch(`${apiBase}/api/events?${params.toString()}`);
+      }
       if (!res.ok) {
         let errorMsg = `Failed to load events (${res.status})`;
         try {

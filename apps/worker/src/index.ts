@@ -974,8 +974,8 @@ app.put('/api/profile', async (c) => {
   return c.json({ profile: result.data, updated_at: now });
 });
 
-// GET /api/events with search & filters
-app.get('/api/events', async (c) => {
+// GET /api/audit-logs & /api/events with search & filters
+const handleGetEvents = async (c: Context<{ Bindings: Bindings; Variables: Variables }>) => {
   try {
     const entity = c.req.query('entity') || null;
     const entityId = c.req.query('entity_id') || null;
@@ -1058,7 +1058,10 @@ app.get('/api/events', async (c) => {
       500,
     );
   }
-});
+};
+
+app.get('/api/audit-logs', handleGetEvents);
+app.get('/api/events', handleGetEvents);
 
 // POST /api/pipeline/run: Runs the Phase 4 scoring and routing pipeline on 'new' jobs
 app.post('/api/pipeline/run', async (c) => {

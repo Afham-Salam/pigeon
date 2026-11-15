@@ -596,7 +596,19 @@ describe('Pigeon Data Layer & Schema Tests', () => {
     });
   });
 
-  describe('Events API (GET /api/events)', () => {
+  describe('Events API (GET /api/events & /api/audit-logs)', () => {
+    it('supports both /api/audit-logs and /api/events', async () => {
+      const resAudit = await app.request('/api/audit-logs', { method: 'GET' }, workerEnv);
+      expect(resAudit.status).toBe(200);
+      const jsonAudit = await resAudit.json<{ events: unknown[] }>();
+      expect(Array.isArray(jsonAudit.events)).toBe(true);
+
+      const resEvents = await app.request('/api/events', { method: 'GET' }, workerEnv);
+      expect(resEvents.status).toBe(200);
+      const jsonEvents = await resEvents.json<{ events: unknown[] }>();
+      expect(Array.isArray(jsonEvents.events)).toBe(true);
+    });
+
     it('filters events by entity and type', async () => {
       const resAll = await app.request('/api/events', { method: 'GET' }, workerEnv);
       expect(resAll.status).toBe(200);
