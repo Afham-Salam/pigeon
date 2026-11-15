@@ -30,6 +30,7 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<FilterKind>('all');
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
 
   const loadSources = useCallback(async () => {
     try {
@@ -41,6 +42,7 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
       }
       const data = (await res.json()) as { ok: boolean; sources: SourceStatusItem[] };
       setSources(data.sources || []);
+      setLastRefreshed(new Date());
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -87,9 +89,23 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
           </p>
         </div>
 
-        <Button variant="secondary" size="sm" icon={RefreshCw} onClick={() => void loadSources()} className="self-start sm:self-auto shrink-0">
-          Refresh Status
-        </Button>
+        <div className="flex flex-col sm:items-end gap-1.5 self-start sm:self-auto shrink-0">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={RefreshCw}
+            loading={loading}
+            onClick={() => void loadSources()}
+            className="w-full sm:w-auto"
+          >
+            {loading ? 'Refreshing...' : 'Refresh Status'}
+          </Button>
+          {lastRefreshed && (
+            <span className="text-[11px] text-fg-muted font-mono">
+              Updated {lastRefreshed.toLocaleTimeString()}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Safety & Portal Policy Notice */}
