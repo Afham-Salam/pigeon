@@ -1097,6 +1097,15 @@ app.post('/api/pipeline/run', async (c) => {
     config: { max_scored_per_day: maxScoredPerDay },
   });
 
+  try {
+    const raw = await c.env.CONFIG.get('cron:last_runs');
+    const runs = raw ? JSON.parse(raw) : {};
+    runs['*/10 * * * *'] = new Date().toISOString();
+    await c.env.CONFIG.put('cron:last_runs', JSON.stringify(runs));
+  } catch {
+    // Non-blocking
+  }
+
   return c.json({ ok: true, stats });
 });
 
@@ -1911,6 +1920,74 @@ app.get('/api/overview', async (c) => {
   // Effective dry run = (wrangler var is true) OR (KV override is true)
   const dryRun = await getEffectiveDryRun(env.DRY_RUN, c.env.CONFIG);
 
+  // Cron last run times
+  const cronLastRunsRaw = await c.env.CONFIG.get('cron:last_runs');
+  let cronLastRuns: Record<string, string> = {};
+  if (cronLastRunsRaw) {
+    try {
+      cronLastRuns = JSON.parse(cronLastRunsRaw);
+    } catch {
+      // fallback
+    }
+  }
+
+  // Fallback to D1 timestamps if KV hasn't recorded yet:
+  let lastIngest = cronLastRuns['0 */3 * * *'] || null;
+  if (!lastIngest) {
+    try {
+      const ssRow = await c.env.DB.prepare(
+        'SELECT MAX(last_run_at) as last_run FROM source_state',
+      ).first<{ last_run: string | null }>();
+      lastIngest = ssRow?.last_run || null;
+    } catch {
+      // fallback
+    }
+  }
+
+  let lastScore = cronLastRuns['*/10 * * * *'] || null;
+  if (!lastScore) {
+    try {
+      const jobRow = await c.env.DB.prepare(
+        `SELECT MAX(updated_at) as last_run FROM jobs WHERE status IN ('scored', 'skipped', 'filtered_out')`,
+      ).first<{ last_run: string | null }>();
+      lastScore = jobRow?.last_run || null;
+    } catch {
+      // fallback
+    }
+  }
+
+  let lastInbox = cronLastRuns['*/15 * * * *'] || null;
+  if (!lastInbox) {
+    lastInbox = authHealth?.checked_at || null;
+  }
+
+  const cronJobs = [
+    {
+      id: 'ingest',
+      name: 'Job Ingestion',
+      cron: '0 */3 * * *',
+      schedule: 'Every 3 hours',
+      description: 'Fetches active ATS & job boards, purges stale records',
+      lastRunAt: lastIngest,
+    },
+    {
+      id: 'score',
+      name: 'Scoring & Pipeline',
+      cron: '*/10 * * * *',
+      schedule: 'Every 10 minutes',
+      description: 'Evaluates new jobs with LLM & syncs Google Sheets',
+      lastRunAt: lastScore,
+    },
+    {
+      id: 'inbox',
+      name: 'Inbox & Health',
+      cron: '*/15 * * * *',
+      schedule: 'Every 15 minutes',
+      description: 'Polls Gmail for employer replies & verifies auth',
+      lastRunAt: lastInbox,
+    },
+  ];
+
   return c.json({
     sendsToday,
     effectiveCap,
@@ -1923,6 +2000,7 @@ app.get('/api/overview', async (c) => {
     authHealth,
     dryRun,
     killSwitch,
+    cronJobs,
   });
 });
 
@@ -2265,6 +2343,16 @@ app.post('/api/sources/sync', async (c) => {
   for (const source of enabledSources) {
     await c.env.JOBS_QUEUE.send({ source });
   }
+
+  try {
+    const raw = await c.env.CONFIG.get('cron:last_runs');
+    const runs = raw ? JSON.parse(raw) : {};
+    runs['0 */3 * * *'] = new Date().toISOString();
+    await c.env.CONFIG.put('cron:last_runs', JSON.stringify(runs));
+  } catch {
+    // Non-blocking
+  }
+
   return c.json({
     ok: true,
     message: `Triggered ingestion for ${enabledSources.length} sources`,
@@ -3363,6 +3451,29 @@ app.post('/api/dev/feed-eml', async (c) => {
 export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledEvent, env: Bindings): Promise<void> {
+    const nowIso = new Date().toISOString();
+    const cronKey = _event?.cron || '0 */3 * * *';
+
+    try {
+      const raw = await env.CONFIG.get('cron:last_runs');
+      const runs = raw ? JSON.parse(raw) : {};
+      runs[cronKey] = nowIso;
+      await env.CONFIG.put('cron:last_runs', JSON.stringify(runs));
+    } catch (err) {
+      logger.error('Error recording cron last run in KV', err);
+    }
+
+    try {
+      await env.DB.prepare(
+        `INSERT INTO events (id, entity, entity_id, type, payload, created_at)
+         VALUES (?, 'system', 'cron', 'cron_executed', ?, ?)`,
+      )
+        .bind(crypto.randomUUID(), JSON.stringify({ cron: cronKey }), nowIso)
+        .run();
+    } catch {
+      // Non-blocking
+    }
+
     const enabledSources = await getEnabledSources(env.CONFIG);
     for (const source of enabledSources) {
       await env.JOBS_QUEUE.send({ source });

@@ -1,10 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Loader2, ArrowRight } from 'lucide-react';
+import { Loader2, ArrowRight, Clock } from 'lucide-react';
 import { ConfirmationModal } from './ConfirmationModal.js';
 import { AlertBanner } from './ui/AlertBanner.js';
 import { MetricCard } from './ui/MetricCard.js';
 import { Button } from './ui/Button.js';
 import { apiFetch, getGoogleAuthStartUrl } from '../api.js';
+
+export interface CronJobInfo {
+  id: string;
+  name: string;
+  cron: string;
+  schedule: string;
+  description: string;
+  lastRunAt: string | null;
+}
 
 interface OverviewData {
   sendsToday: number;
@@ -22,6 +31,21 @@ interface OverviewData {
   };
   dryRun: boolean;
   killSwitch: boolean;
+  cronJobs?: CronJobInfo[];
+}
+
+function formatRelativeTime(isoString: string | null | undefined): string {
+  if (!isoString) return 'Never';
+  const date = new Date(isoString);
+  const diffSec = Math.floor((Date.now() - date.getTime()) / 1000);
+  if (diffSec < 0) return 'Just now';
+  if (diffSec < 60) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
 }
 
 interface Props {
@@ -369,6 +393,93 @@ export function OverviewView({
               {data.killSwitch ? 'KILL SWITCH: ACTIVE' : 'KILL SWITCH: OFF'}
             </Button>
           </div>
+        </div>
+      </div>
+
+      {/* Scheduled Cron Jobs */}
+      <div className="bg-surface p-4 sm:p-5 rounded-[6px] border border-border">
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="flex items-center gap-2">
+            <Clock size={16} strokeWidth={1.5} className="text-fg-muted shrink-0" aria-hidden="true" />
+            <h3 className="text-[12px] font-medium uppercase tracking-wider text-fg-muted">
+              Scheduled Cron Jobs (Cloudflare Workers)
+            </h3>
+          </div>
+          <span className="text-[11px] text-fg-muted font-mono bg-surface-subtle px-2 py-0.5 rounded border border-border">
+            3 active triggers
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {(data.cronJobs || [
+            {
+              id: 'ingest',
+              name: 'Job Ingestion',
+              cron: '0 */3 * * *',
+              schedule: 'Every 3 hours',
+              description: 'Fetches active ATS & job boards, purges stale records',
+              lastRunAt: null,
+            },
+            {
+              id: 'score',
+              name: 'Scoring & Pipeline',
+              cron: '*/10 * * * *',
+              schedule: 'Every 10 minutes',
+              description: 'Evaluates new jobs with LLM & syncs Google Sheets',
+              lastRunAt: null,
+            },
+            {
+              id: 'inbox',
+              name: 'Inbox & Health',
+              cron: '*/15 * * * *',
+              schedule: 'Every 15 minutes',
+              description: 'Polls Gmail for employer replies & verifies auth',
+              lastRunAt: null,
+            },
+          ]).map((job) => (
+            <div
+              key={job.id}
+              className="p-3.5 rounded-[6px] border border-border bg-surface-subtle/40 flex flex-col justify-between space-y-2.5"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-[13px] text-fg">{job.name}</span>
+                  <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-surface border border-border text-fg-muted">
+                    {job.cron}
+                  </span>
+                </div>
+                <p className="text-[12px] text-fg-muted mt-1 leading-snug">{job.description}</p>
+              </div>
+
+              <div className="pt-2 border-t border-border/60 flex items-center justify-between text-[12px]">
+                <span className="text-fg-muted">{job.schedule}</span>
+                <div
+                  className="text-right"
+                  title={job.lastRunAt ? new Date(job.lastRunAt).toLocaleString() : undefined}
+                >
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <span
+                      className={`inline-block w-1.5 h-1.5 rounded-full ${
+                        job.lastRunAt ? 'bg-state-ok-fg' : 'bg-fg-muted/40'
+                      }`}
+                      aria-hidden="true"
+                    />
+                    <span className="font-medium font-mono text-fg text-[12px]">
+                      {formatRelativeTime(job.lastRunAt)}
+                    </span>
+                  </div>
+                  {job.lastRunAt && (
+                    <span className="text-[10px] text-fg-muted font-mono block">
+                      {new Date(job.lastRunAt).toLocaleTimeString([], {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      })}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
