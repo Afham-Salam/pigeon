@@ -12,12 +12,14 @@ import {
   ShieldCheck,
   X,
   LogOut,
+  Sparkles,
 } from 'lucide-react';
 import { getStoredToken, clearStoredToken, onUnauthorized, apiFetch } from './api.js';
 import { LoginView } from './components/LoginView.js';
 import { OverviewView } from './components/OverviewView.js';
 import { ReviewQueueView } from './components/ReviewQueueView.js';
 import { ManualQueueView } from './components/ManualQueueView.js';
+import { MailJobsView } from './components/MailJobsView.js';
 import { ApplicationsView } from './components/ApplicationsView.js';
 import { SourcesView } from './components/SourcesView.js';
 import { SettingsView, type SettingsSubTab } from './components/SettingsView.js';
@@ -29,6 +31,7 @@ export type TabKey =
   | 'overview'
   | 'review-queue'
   | 'manual-apply'
+  | 'mail-jobs'
   | 'applications'
   | 'sources'
   | 'settings'
@@ -67,6 +70,7 @@ export function App(): React.JSX.Element {
   const isMoreActive =
     mobileMenuOpen ||
     activeTab === 'sources' ||
+    activeTab === 'mail-jobs' ||
     activeTab === 'settings' ||
     activeTab === 'events' ||
     activeTab === 'setup';
@@ -139,6 +143,7 @@ export function App(): React.JSX.Element {
     { key: 'overview', label: 'Overview' },
     { key: 'review-queue', label: 'Review Queue' },
     { key: 'manual-apply', label: 'Manual Apply' },
+    { key: 'mail-jobs', label: 'Parsed Jobs' },
     { key: 'applications', label: 'Applications' },
     { key: 'sources', label: 'Sources' },
     { key: 'settings', label: 'Settings' },
@@ -374,6 +379,12 @@ export function App(): React.JSX.Element {
           />
         )}
         {activeTab === 'manual-apply' && <ManualQueueView apiBase={apiBase} />}
+        {activeTab === 'mail-jobs' && (
+          <MailJobsView
+            apiBase={apiBase}
+            onNavigateTab={(tab) => setActiveTab(tab as TabKey)}
+          />
+        )}
         {activeTab === 'applications' && <ApplicationsView apiBase={apiBase} />}
         {activeTab === 'sources' && <SourcesView apiBase={apiBase} />}
         {activeTab === 'settings' && (
@@ -521,7 +532,33 @@ export function App(): React.JSX.Element {
 
             {/* List of Remaining Sections Only */}
             <div className="space-y-2">
-              {/* 1. Sources */}
+              {/* 1. Parsed Jobs */}
+              <button
+                type="button"
+                aria-label="Parsed Jobs"
+                onClick={() => {
+                  setActiveTab('mail-jobs');
+                  setMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center justify-between p-3 rounded-[8px] border text-left transition-colors cursor-pointer ${
+                  activeTab === 'mail-jobs'
+                    ? 'bg-surface-subtle border-accent ring-1 ring-accent text-fg font-semibold'
+                    : 'bg-surface border-border hover:bg-surface-subtle text-fg-muted hover:text-fg'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-[6px] bg-surface-subtle border border-border flex items-center justify-center shrink-0">
+                    <Sparkles size={16} strokeWidth={1.5} className={activeTab === 'mail-jobs' ? 'text-accent' : 'text-fg-muted'} aria-hidden="true" />
+                  </div>
+                  <div>
+                    <span className="text-[13px] font-medium text-fg block">Parsed Jobs</span>
+                    <span className="text-[11px] text-fg-muted block mt-0.5">Email alert feed, match scores & AI breakdown</span>
+                  </div>
+                </div>
+                <ChevronRight size={15} strokeWidth={1.5} className="text-fg-muted shrink-0" aria-hidden="true" />
+              </button>
+
+              {/* 2. Sources */}
               <button
                 type="button"
                 aria-label="Sources"

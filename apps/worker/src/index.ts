@@ -2180,6 +2180,75 @@ app.get('/api/applications', async (c) => {
   return c.json({ items: rawRows || [] });
 });
 
+// GET /api/jobs: Ingested jobs with match scores, reasons, and filters
+app.get('/api/jobs', async (c) => {
+  const sourceKind = c.req.query('source_kind') || null;
+  const source = c.req.query('source') || null;
+  const status = c.req.query('status') || null;
+  const search = c.req.query('search') || null;
+  const limit = Math.min(Number.parseInt(c.req.query('limit') || '50', 10), 200);
+  const offset = Math.max(Number.parseInt(c.req.query('offset') || '0', 10), 0);
+
+  const searchPattern = search ? `%${search.toLowerCase()}%` : null;
+
+  const { results: rawRows } = await c.env.DB.prepare(
+    `SELECT
+       j.id, j.dedupe_key, j.source, j.source_kind, j.source_job_id,
+       j.title, j.company, j.location, j.remote, j.salary_min, j.salary_max, j.currency, j.salary_raw,
+       j.description, j.apply_url, j.contact_email, j.contact_source, j.posted_at, j.fetched_at,
+       j.status, j.filter_reason, j.match_score, j.match_reasons, j.red_flags,
+       j.apply_route, j.route_reason, j.updated_at
+     FROM jobs j
+     WHERE (? IS NULL OR j.source_kind = ?)
+       AND (? IS NULL OR j.source = ?)
+       AND (? IS NULL OR j.status = ?)
+       AND (? IS NULL OR (LOWER(j.title) LIKE ? OR LOWER(j.company) LIKE ?))
+     ORDER BY j.updated_at DESC
+     LIMIT ? OFFSET ?`,
+  )
+    .bind(
+      sourceKind,
+      sourceKind,
+      source,
+      source,
+      status,
+      status,
+      searchPattern,
+      searchPattern,
+      searchPattern,
+      limit,
+      offset,
+    )
+    .all();
+
+  const countRow = await c.env.DB.prepare(
+    `SELECT count(*) as total
+     FROM jobs j
+     WHERE (? IS NULL OR j.source_kind = ?)
+       AND (? IS NULL OR j.source = ?)
+       AND (? IS NULL OR j.status = ?)
+       AND (? IS NULL OR (LOWER(j.title) LIKE ? OR LOWER(j.company) LIKE ?))`,
+  )
+    .bind(
+      sourceKind,
+      sourceKind,
+      source,
+      source,
+      status,
+      status,
+      searchPattern,
+      searchPattern,
+      searchPattern,
+    )
+    .first<{ total: number }>();
+
+  return c.json({
+    ok: true,
+    jobs: rawRows || [],
+    total: countRow?.total ?? (rawRows?.length || 0),
+  });
+});
+
 // 7. GET /api/sources: Source circuit and parser health
 app.get('/api/sources', async (c) => {
   interface SourceStateDbRow {

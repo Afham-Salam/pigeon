@@ -205,6 +205,59 @@ describe('Dashboard App & Operations Components', () => {
           });
         }
 
+        if (u.includes('/api/alerts/sync') && init?.method === 'POST') {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ok: true,
+              processed: 2,
+              routed: 1,
+              filtered: 1,
+              skipped: 0,
+            }),
+          });
+        }
+
+        if (u.includes('/api/jobs')) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ok: true,
+              jobs: [
+                {
+                  id: 'job-mail-1',
+                  dedupe_key: 'dedupe-whatjobs-1',
+                  source: 'whatjobs',
+                  source_kind: 'alert_email',
+                  source_job_id: 'wj-101',
+                  title: 'Flutter Developer',
+                  company: 'Acme Mobile',
+                  location: 'Bengaluru, India',
+                  remote: true,
+                  salary_raw: '₹15,00,000 - ₹20,00,000',
+                  description: 'Looking for a talented Flutter and Dart developer.',
+                  apply_url: 'https://whatjobs.com/apply/101',
+                  contact_email: 'hiring@acmemobile.com',
+                  contact_source: 'posting',
+                  posted_at: new Date().toISOString(),
+                  fetched_at: new Date().toISOString(),
+                  status: 'routed',
+                  filter_reason: null,
+                  match_score: 88,
+                  match_reasons: JSON.stringify(['Strong Flutter/Dart experience', 'Remote role fits preferences']),
+                  red_flags: JSON.stringify([]),
+                  apply_route: 'auto_email',
+                  route_reason: 'AUTO_EMAIL_CONTACT',
+                  updated_at: new Date().toISOString(),
+                },
+              ],
+              total: 1,
+            }),
+          });
+        }
+
         if (u.includes('/api/settings/kill-switch') && init?.method === 'POST') {
           return Promise.resolve({
             ok: true,
@@ -345,6 +398,32 @@ describe('Dashboard App & Operations Components', () => {
 
     expect(container?.textContent).toContain('Audit Events Log');
     expect(container?.textContent).toContain('kill_switch_toggled');
+  });
+
+  it('navigates to Parsed Jobs view and displays parsed jobs with match scores', async () => {
+    await act(async () => {
+      root?.render(<App />);
+    });
+
+    const parsedJobsTabs = Array.from(container?.querySelectorAll('button') || []).filter((b) =>
+      b.textContent?.includes('Parsed Jobs'),
+    );
+    expect(parsedJobsTabs.length).toBeGreaterThan(0);
+
+    await act(async () => {
+      parsedJobsTabs[0]?.click();
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await new Promise((r) => setTimeout(r, 50));
+    });
+
+    expect(container?.textContent).toContain('Mail Parsed Jobs & AI Match Scoring');
+    expect(container?.textContent).toContain('Flutter Developer');
+    expect(container?.textContent).toContain('Acme Mobile');
+    expect(container?.textContent).toContain('88');
+    expect(container?.textContent).toContain('Sync Alerts from Gmail');
   });
 
   it('opens confirmation modal before toggling Kill Switch', async () => {
