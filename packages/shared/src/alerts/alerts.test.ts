@@ -12,6 +12,7 @@ import {
   isAuthorizedForwarding,
   handleParserHealth,
   ingestAlertEmail,
+  pollGmailAlerts,
   type Notifier,
 } from '../index.js';
 import type { D1LikeDatabase } from '../state-machine.js';
@@ -85,10 +86,18 @@ function createMockDb(): {
               untrusted: state.untrusted,
             } as unknown as T;
           }
+          if (query.includes('FROM events WHERE entity = ? AND entity_id = ?')) {
+            const entity = String(boundParams[0]);
+            const entityId = String(boundParams[1]);
+            const ev = events.find((e) => e.entity === entity && e.entity_id === entityId);
+            if (!ev) return null;
+            return { entity_id: ev.entity_id } as unknown as T;
+          }
           return null;
         },
         async run() {
-          if (query.startsWith('INSERT INTO events')) {
+          const trimmed = query.trim();
+          if (trimmed.startsWith('INSERT INTO events')) {
             const [id, entity, entity_id, type, payload, created_at] = boundParams as string[];
             events.push({
               id: id ?? '',
@@ -98,7 +107,7 @@ function createMockDb(): {
               payload: payload ?? '',
               created_at: created_at ?? '',
             });
-          } else if (query.startsWith('INSERT INTO source_state')) {
+          } else if (trimmed.startsWith('INSERT INTO source_state')) {
             const src = String(boundParams[0]);
             let streak = 0;
             let untrusted = 0;
@@ -950,6 +959,78 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       expect(jobs.size).toBe(0);
 
       warnSpy.mockRestore();
+    });
+  });
+
+  describe('Gmail Alert Poller (Zero-Domain Ingestion)', () => {
+    it('searches Gmail, fetches raw EMLs, ingests new jobs, and records audit events', async () => {
+      const { db, jobs, events } = createMockDb();
+      const encoder = new TextEncoder();
+
+      const mockGmailSender = {
+        send: vi.fn(),
+        searchSentByMessageId: vi.fn(),
+        searchMessages: vi.fn().mockResolvedValue([
+          { id: 'msg-whatjobs-101', threadId: 'th-101' },
+          { id: 'msg-bebee-102', threadId: 'th-102' },
+        ]),
+        getRawMessageBytes: vi.fn().mockImplementation(async (msgId: string) => {
+          if (msgId === 'msg-whatjobs-101') {
+            return encoder.encode(WHATJOBS_EML_FIXTURE);
+          }
+          if (msgId === 'msg-bebee-102') {
+            return encoder.encode(BEBEE_EML_FIXTURE);
+          }
+          return null;
+        }),
+      };
+
+      const result = await pollGmailAlerts({
+        db,
+        gmailSender: mockGmailSender,
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.messagesFound).toBe(2);
+      expect(result.messagesProcessed).toBe(2);
+      expect(result.jobsFound).toBe(4);
+      expect(result.newJobs).toBe(4);
+      expect(jobs.size).toBe(4);
+
+      // Verify audit events recorded in events table
+      const auditEvents = events.filter((e) => e.entity === 'gmail_alert');
+      expect(auditEvents).toHaveLength(2);
+      expect(auditEvents.map((e) => e.entity_id)).toEqual(['msg-whatjobs-101', 'msg-bebee-102']);
+
+      // 2. Test Idempotency: Second poll with same messages skips already processed messages
+      const secondPoll = await pollGmailAlerts({
+        db,
+        gmailSender: mockGmailSender,
+      });
+
+      expect(secondPoll.success).toBe(true);
+      expect(secondPoll.messagesFound).toBe(2);
+      expect(secondPoll.messagesProcessed).toBe(0);
+      expect(secondPoll.newJobs).toBe(0);
+    });
+
+    it('gracefully handles Gmail search API errors', async () => {
+      const { db } = createMockDb();
+      const mockGmailSender = {
+        send: vi.fn(),
+        searchSentByMessageId: vi.fn(),
+        searchMessages: vi.fn().mockRejectedValue(new Error('Gmail 503 Service Unavailable')),
+        getRawMessageBytes: vi.fn(),
+      };
+
+      const result = await pollGmailAlerts({
+        db,
+        gmailSender: mockGmailSender,
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.errors).toBe(1);
+      expect(result.reason).toContain('Gmail 503');
     });
   });
 });

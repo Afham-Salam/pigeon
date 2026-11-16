@@ -15,6 +15,7 @@ export * from './alerts/parsers/indeed.js';
 export * from './alerts/parsers/fallback.js';
 export * from './alerts/parser-health.js';
 export * from './alerts/ingest.js';
+export * from './alerts/gmail-poller.js';
 export * from './scoring/filter-rules.js';
 export * from './scoring/skip-checks.js';
 export * from './scoring/llm-client.js';

@@ -1,10 +1,11 @@
-import { buildMimeMessage, toBase64Url } from './mime.js';
+import { buildMimeMessage, toBase64Url, fromBase64UrlToBytes } from './mime.js';
 import {
   type GmailSender,
   type SendEmailParams,
   type SendEmailResult,
   type GmailThread,
   GmailSearchMessagesResponseSchema,
+  GmailRawMessageResponseSchema,
   GmailThreadSchema,
 } from './types.js';
 
@@ -148,5 +149,75 @@ export class RestGmailSender implements GmailSender {
 
     const raw = await res.json();
     return GmailThreadSchema.parse(raw);
+  }
+
+  async searchMessages(
+    query: string,
+    maxResults = 20,
+  ): Promise<Array<{ id: string; threadId: string }>> {
+    const token = await this.getAccessToken();
+    const encodedQ = encodeURIComponent(query);
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQ}&maxResults=${maxResults}`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    if (res.status === 401) {
+      const error = new Error('GoogleAuthError: 401 Unauthorized');
+      error.name = 'GoogleAuthError';
+      throw error;
+    }
+
+    if (res.status === 429) {
+      throw new GoogleRateLimitError('Gmail rate limit exceeded (429)');
+    }
+
+    if (!res.ok) {
+      throw new GoogleServerError(res.status, `Failed to search messages: HTTP ${res.status}`);
+    }
+
+    const raw = await res.json();
+    const data = GmailSearchMessagesResponseSchema.parse(raw);
+    return data.messages || [];
+  }
+
+  async getRawMessageBytes(messageId: string): Promise<Uint8Array | null> {
+    const token = await this.getAccessToken();
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}?format=raw`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    if (res.status === 404) {
+      return null;
+    }
+
+    if (res.status === 401) {
+      const error = new Error('GoogleAuthError: 401 Unauthorized');
+      error.name = 'GoogleAuthError';
+      throw error;
+    }
+
+    if (res.status === 429) {
+      throw new GoogleRateLimitError('Gmail rate limit exceeded (429)');
+    }
+
+    if (!res.ok) {
+      throw new GoogleServerError(res.status, `Failed to get raw message ${messageId}: HTTP ${res.status}`);
+    }
+
+    const raw = await res.json();
+    const parsed = GmailRawMessageResponseSchema.parse(raw);
+    return fromBase64UrlToBytes(parsed.raw);
+  }
+
+  async getRawMessage(messageId: string): Promise<string | null> {
+    const bytes = await this.getRawMessageBytes(messageId);
+    if (!bytes) return null;
+    return new TextDecoder('utf-8').decode(bytes);
   }
 }

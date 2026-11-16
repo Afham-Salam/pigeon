@@ -30,7 +30,7 @@ export interface AlertIngestOptions {
 }
 
 export async function ingestAlertEmail(
-  rawEmail: ReadableStream<Uint8Array> | ArrayBuffer | string,
+  rawEmail: ReadableStream<Uint8Array> | ArrayBuffer | Uint8Array | string,
   options: AlertIngestOptions,
 ): Promise<AlertIngestResult> {
   const { db, envelope, configuredForwardingAddress, notifier } = options;

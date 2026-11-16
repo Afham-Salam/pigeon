@@ -30,6 +30,8 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [syncingGmail, setSyncingGmail] = useState(false);
+  const [gmailFeedback, setGmailFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<FilterKind>('all');
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
@@ -79,6 +81,44 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
       setSyncFeedback('Failed to trigger ingestion.');
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleSyncGmailAlerts = async () => {
+    try {
+      setSyncingGmail(true);
+      setGmailFeedback(null);
+      const res = await apiFetch(`${apiBase}/api/alerts/sync`, { method: 'POST' });
+      if (res.ok) {
+        const json = (await res.json()) as {
+          messagesFound?: number;
+          messagesProcessed?: number;
+          newJobs?: number;
+          duplicates?: number;
+        };
+        const processed = json.messagesProcessed ?? 0;
+        const newJobs = json.newJobs ?? 0;
+        if (processed > 0) {
+          setGmailFeedback(
+            `Gmail alerts synced: ${processed} alert email(s) processed, ${newJobs} new jobs queued for scoring!`,
+          );
+        } else {
+          setGmailFeedback(
+            `Gmail checked: ${json.messagesFound ?? 0} matching alert email(s) found, 0 new unparsed emails.`,
+          );
+        }
+        await loadSources();
+        setTimeout(() => setGmailFeedback(null), 6000);
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setGmailFeedback(`Gmail sync failed: ${(errJson as { error?: string }).error || res.statusText}`);
+        setTimeout(() => setGmailFeedback(null), 6000);
+      }
+    } catch (err) {
+      setGmailFeedback(`Gmail sync error: ${err instanceof Error ? err.message : String(err)}`);
+      setTimeout(() => setGmailFeedback(null), 6000);
+    } finally {
+      setSyncingGmail(false);
     }
   };
 
@@ -163,6 +203,16 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
             {loading ? 'Refreshing...' : 'Refresh Status'}
           </Button>
           <Button
+            variant="secondary"
+            size="sm"
+            icon={Mail}
+            loading={syncingGmail}
+            onClick={() => void handleSyncGmailAlerts()}
+            className="w-full sm:w-auto"
+          >
+            {syncingGmail ? 'Checking Gmail...' : 'Sync Gmail Alerts'}
+          </Button>
+          <Button
             variant="primary"
             size="sm"
             loading={syncing}
@@ -188,6 +238,19 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
       {syncFeedback && (
         <div className="bg-state-ok-bg border border-state-ok-border text-state-ok-fg p-3 rounded-[6px] text-[13px] flex items-center justify-between">
           <span>{syncFeedback}</span>
+        </div>
+      )}
+
+      {gmailFeedback && (
+        <div className="bg-surface border border-accent/40 text-fg p-3 rounded-[6px] text-[13px] flex items-center justify-between">
+          <span>{gmailFeedback}</span>
+          <button
+            type="button"
+            onClick={() => setGmailFeedback(null)}
+            className="text-fg-muted hover:text-fg text-[12px] ml-2"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

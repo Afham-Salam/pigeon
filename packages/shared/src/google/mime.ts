@@ -61,6 +61,30 @@ export function toBase64Url(str: string): string {
 }
 
 /**
+ * Decodes an RFC 4648 Base64URL string into raw bytes (Uint8Array).
+ */
+export function fromBase64UrlToBytes(base64Url: string): Uint8Array {
+  let base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4 !== 0) {
+    base64 += '=';
+  }
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+/**
+ * Decodes an RFC 4648 Base64URL string into a UTF-8 string.
+ */
+export function fromBase64Url(base64Url: string): string {
+  const bytes = fromBase64UrlToBytes(base64Url);
+  return new TextDecoder('utf-8').decode(bytes);
+}
+
+/**
  * Builds an RFC 2822 multipart/mixed MIME message string.
  */
 export function buildMimeMessage(params: SendEmailParams): string {

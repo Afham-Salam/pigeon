@@ -72,6 +72,17 @@ export const GmailSearchMessagesResponseSchema = z.object({
   nextPageToken: z.string().max(1000).optional(),
 });
 
+export const GmailRawMessageResponseSchema = z.object({
+  id: z.string().max(100),
+  threadId: z.string().max(100).optional(),
+  snippet: z.string().max(5000).optional(),
+  historyId: z.string().max(100).optional(),
+  internalDate: z.string().max(100).optional(),
+  raw: z.string(),
+  sizeEstimate: z.number().int().optional(),
+});
+export type GmailRawMessageResponse = z.infer<typeof GmailRawMessageResponseSchema>;
+
 export interface AuthHealthState {
   status: 'ok' | 'invalid' | 'unknown';
   checked_at: string;
@@ -125,6 +136,12 @@ export interface GmailSender {
     threadId: string,
     format?: 'metadata' | 'full' | 'minimal',
   ): Promise<GmailThread | null>;
+  searchMessages?(
+    query: string,
+    maxResults?: number,
+  ): Promise<Array<{ id: string; threadId: string }>>;
+  getRawMessage?(messageId: string): Promise<string | null>;
+  getRawMessageBytes?(messageId: string): Promise<Uint8Array | null>;
 }
 
 export interface GoogleProfileResponse {

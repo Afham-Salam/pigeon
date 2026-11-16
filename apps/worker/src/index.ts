@@ -6,6 +6,7 @@ import {
   getEnabledSources,
   ingestSource,
   ingestAlertEmail,
+  pollGmailAlerts,
   EventsNotifier,
   createLLMClient,
   DefaultScorer,
@@ -2362,6 +2363,71 @@ app.post('/api/sources/sync', async (c) => {
   });
 });
 
+// POST /api/alerts/sync: Polls Gmail directly for new job alert emails and ingests them into D1
+app.post('/api/alerts/sync', async (c) => {
+  const appConfig = await getConfig(c.env, c.env.DB);
+  if (!appConfig.hasGoogleOAuth()) {
+    return c.json({ error: 'Google OAuth not configured' }, 400);
+  }
+
+  let tokenEncryptionKey: string;
+  try {
+    tokenEncryptionKey = getTokenKey(c.env);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 503);
+  }
+
+  const googleOAuth = appConfig.getGoogleOAuth();
+  const secrets: GoogleOAuthSecrets = {
+    clientId: googleOAuth.clientId as string,
+    clientSecret: googleOAuth.clientSecret as string,
+    tokenEncryptionKey,
+  };
+
+  const notifier = await createWorkerNotifier(c.env, appConfig);
+  const gmailSender = new RestGmailSender(() =>
+    getValidAccessToken({
+      config: c.env.CONFIG,
+      secrets,
+      notifier,
+    }),
+  );
+
+  let configuredForwardingAddress = appConfig.getIdentityConfig().alertForwardingAddress;
+  if (!configuredForwardingAddress) {
+    const profileRow = await c.env.DB.prepare('SELECT data FROM profile WHERE id = ?')
+      .bind('default')
+      .first<{ data: string }>();
+    if (profileRow?.data) {
+      try {
+        const profile = JSON.parse(profileRow.data) as { email?: string };
+        if (profile.email) {
+          configuredForwardingAddress = profile.email;
+        }
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  const result = await pollGmailAlerts({
+    db: c.env.DB,
+    gmailSender,
+    notifier,
+    configuredForwardingAddress,
+  });
+
+  if (result.newJobs > 0) {
+    try {
+      await c.env.JOBS_QUEUE.send({ action: 'score_and_route' });
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  return c.json({ ok: result.success, ...result });
+});
+
 // 8. GET /api/settings: Profile, Dry Run, Kill Switch, Resumes
 app.get('/api/settings', async (c) => {
   const env = c.get('validatedEnv');
@@ -3514,6 +3580,7 @@ export default {
     if (hasGoogleOAuth) {
       try {
         await env.JOBS_QUEUE.send({ action: 'poll_inbox' });
+        await env.JOBS_QUEUE.send({ action: 'sync_gmail_alerts' });
       } catch (err) {
         logger.error('Error enqueuing scheduled inbox poll', err);
       }
@@ -3793,6 +3860,57 @@ export default {
           }
         } catch (err) {
           logger.error('Error during poll_inbox queue task', err);
+        }
+      } else if (body && body.action === 'sync_gmail_alerts') {
+        try {
+          if (appConfig.hasGoogleOAuth()) {
+            const googleOAuth = appConfig.getGoogleOAuth();
+            const tokenEncryptionKey = getTokenKey(env);
+            const secrets: GoogleOAuthSecrets = {
+              clientId: googleOAuth.clientId as string,
+              clientSecret: googleOAuth.clientSecret as string,
+              tokenEncryptionKey,
+            };
+
+            const notifier = await createWorkerNotifier(env, appConfig);
+            const gmailSender = new RestGmailSender(() =>
+              getValidAccessToken({
+                config: env.CONFIG,
+                secrets,
+                notifier,
+              }),
+            );
+
+            let configuredForwardingAddress = appConfig.getIdentityConfig().alertForwardingAddress;
+            if (!configuredForwardingAddress) {
+              const profileRow = await env.DB.prepare('SELECT data FROM profile WHERE id = ?')
+                .bind('default')
+                .first<{ data: string }>();
+              if (profileRow?.data) {
+                try {
+                  const profile = JSON.parse(profileRow.data) as { email?: string };
+                  if (profile.email) {
+                    configuredForwardingAddress = profile.email;
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+            }
+
+            const pollRes = await pollGmailAlerts({
+              db: env.DB,
+              gmailSender,
+              notifier,
+              configuredForwardingAddress,
+            });
+
+            if (pollRes.newJobs > 0) {
+              await env.JOBS_QUEUE.send({ action: 'score_and_route' });
+            }
+          }
+        } catch (err) {
+          logger.error('Error during sync_gmail_alerts queue task', err);
         }
       }
       msg.ack();

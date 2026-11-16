@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Loader2, ArrowRight, Clock } from 'lucide-react';
+import { Loader2, ArrowRight, Clock, Mail } from 'lucide-react';
 import { ConfirmationModal } from './ConfirmationModal.js';
 import { AlertBanner } from './ui/AlertBanner.js';
 import { MetricCard } from './ui/MetricCard.js';
@@ -72,6 +72,8 @@ export function OverviewView({
   const [actionLoading, setActionLoading] = useState(false);
   const [pipelineRunning, setPipelineRunning] = useState(false);
   const [pipelineResult, setPipelineResult] = useState<string | null>(null);
+  const [syncingGmail, setSyncingGmail] = useState(false);
+  const [gmailSyncResult, setGmailSyncResult] = useState<string | null>(null);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -107,6 +109,45 @@ export function OverviewView({
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
+
+  const handleSyncGmailAlerts = async () => {
+    try {
+      setSyncingGmail(true);
+      setGmailSyncResult(null);
+      const res = await apiFetch(`${apiBase}/api/alerts/sync`, { method: 'POST' });
+      if (res.ok) {
+        const json = (await res.json()) as {
+          messagesFound?: number;
+          messagesProcessed?: number;
+          newJobs?: number;
+          duplicates?: number;
+        };
+        const processed = json.messagesProcessed ?? 0;
+        const newJobs = json.newJobs ?? 0;
+        if (processed > 0) {
+          setGmailSyncResult(
+            `Gmail alerts synced: ${processed} alert email(s) processed, ${newJobs} new jobs queued for scoring!`,
+          );
+        } else {
+          setGmailSyncResult(
+            `Gmail checked: ${json.messagesFound ?? 0} matching alert email(s) found, 0 new unparsed emails.`,
+          );
+        }
+        await loadOverview();
+        onDataRefresh?.();
+        setTimeout(() => setGmailSyncResult(null), 6000);
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        setGmailSyncResult(`Gmail sync failed: ${(errJson as { error?: string }).error || res.statusText}`);
+        setTimeout(() => setGmailSyncResult(null), 6000);
+      }
+    } catch (err) {
+      setGmailSyncResult(`Gmail sync error: ${err instanceof Error ? err.message : String(err)}`);
+      setTimeout(() => setGmailSyncResult(null), 6000);
+    } finally {
+      setSyncingGmail(false);
+    }
+  };
 
   const handleToggleKillSwitch = async (activate: boolean) => {
     try {
@@ -259,18 +300,44 @@ export function OverviewView({
             : 'Gmail API and Google Sheets tokens are active with automatic refresh.'
         }
         action={
-          <a
-            href={getGoogleAuthStartUrl(apiBase)}
-            className={`inline-flex items-center justify-center font-medium rounded-[6px] h-7 px-2.5 text-[13px] transition-colors ${
-              isAuthInvalid
-                ? 'bg-state-danger-bg text-state-danger-fg border border-state-danger-border hover:opacity-90'
-                : 'bg-surface text-fg border border-border hover:bg-surface-subtle'
-            }`}
-          >
-            {isAuthInvalid ? 'Reconnect Google Account' : 'Re-authenticate Google'}
-          </a>
+          <div className="flex flex-wrap items-center gap-2">
+            {!isAuthInvalid && (
+              <Button
+                variant="primary"
+                size="sm"
+                icon={Mail}
+                loading={syncingGmail}
+                onClick={() => void handleSyncGmailAlerts()}
+              >
+                {syncingGmail ? 'Checking Gmail...' : 'Sync Alerts from Gmail'}
+              </Button>
+            )}
+            <a
+              href={getGoogleAuthStartUrl(apiBase)}
+              className={`inline-flex items-center justify-center font-medium rounded-[6px] h-7 px-2.5 text-[13px] transition-colors ${
+                isAuthInvalid
+                  ? 'bg-state-danger-bg text-state-danger-fg border border-state-danger-border hover:opacity-90'
+                  : 'bg-surface text-fg border border-border hover:bg-surface-subtle'
+              }`}
+            >
+              {isAuthInvalid ? 'Reconnect Google Account' : 'Re-authenticate Google'}
+            </a>
+          </div>
         }
       />
+
+      {gmailSyncResult && (
+        <div className="p-3 bg-surface border border-accent/40 rounded-[6px] text-[13px] text-fg flex items-center justify-between">
+          <span>{gmailSyncResult}</span>
+          <button
+            type="button"
+            onClick={() => setGmailSyncResult(null)}
+            className="text-fg-muted hover:text-fg text-[12px] ml-2"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Key Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
