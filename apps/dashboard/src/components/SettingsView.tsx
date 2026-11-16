@@ -1,15 +1,18 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import type { Profile, SettingFieldSummary } from '@pigeon/shared';
+import type { Profile, SettingFieldSummary, ExperienceItem } from '@pigeon/shared';
 import {
   AlertTriangle,
+  Briefcase,
   Loader2,
   Mail,
   Moon,
   Palette,
+  Plus,
   Shield,
   Sliders,
   Sun,
   SunMoon,
+  Trash2,
   User,
   Plug,
   FileText,
@@ -91,6 +94,46 @@ export function SettingsView({
   const [workplaceType, setWorkplaceType] = useState<
     'all' | 'remote' | 'hybrid' | 'remote_and_hybrid' | 'onsite'
   >('all');
+  const [experienceList, setExperienceList] = useState<ExperienceItem[]>([]);
+
+  const addExperience = () => {
+    setExperienceList((prev) => [
+      ...prev,
+      {
+        title: '',
+        company: '',
+        start_date: '',
+        end_date: '',
+        current: false,
+        description: '',
+        highlights: [],
+      },
+    ]);
+  };
+
+  const removeExperience = (index: number) => {
+    setExperienceList((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateExperience = (index: number, patch: Partial<ExperienceItem>) => {
+    setExperienceList((prev) => {
+      const next = [...prev];
+      const cur = next[index];
+      if (cur) {
+        next[index] = {
+          title: patch.title !== undefined ? patch.title : cur.title,
+          company: patch.company !== undefined ? patch.company : cur.company,
+          location: patch.location !== undefined ? patch.location : cur.location,
+          start_date: patch.start_date !== undefined ? patch.start_date : cur.start_date,
+          end_date: patch.end_date !== undefined ? patch.end_date : cur.end_date,
+          current: patch.current !== undefined ? patch.current : cur.current,
+          description: patch.description !== undefined ? patch.description : cur.description,
+          highlights: patch.highlights !== undefined ? patch.highlights : cur.highlights,
+        };
+      }
+      return next;
+    });
+  };
 
   // Sync initialSubTab when parent changes it
   useEffect(() => {
@@ -175,6 +218,7 @@ export function SettingsView({
           (data.profile.preferences?.workplace_type as typeof workplaceType) ||
           (data.profile.filters?.remote === true ? 'remote' : 'all');
         setWorkplaceType(wpType);
+        setExperienceList(data.profile.experience || []);
       }
     } catch (err) {
       setFeedback({
@@ -278,8 +322,8 @@ export function SettingsView({
         name,
         email,
         skills,
-        experience_years: profile?.experience_years,
-        experience: profile?.experience || [],
+        experience_years: profile?.experience_years ?? 4,
+        experience: experienceList,
         education: profile?.education || [],
         preferences: {
           ...(profile?.preferences || {}),
@@ -637,6 +681,158 @@ export function SettingsView({
                 className="w-full text-[13px] font-mono tabular-nums px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               />
             </div>
+          </div>
+
+          {/* Work Experience & Projects Section */}
+          <div className="space-y-4 pt-6 border-t border-border">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Briefcase
+                  size={16}
+                  strokeWidth={1.5}
+                  className="text-fg-muted shrink-0"
+                  aria-hidden="true"
+                />
+                <h3 className="text-[12px] font-medium uppercase tracking-wider text-fg-muted">
+                  Work Experience &amp; Projects
+                </h3>
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={addExperience}
+                className="flex items-center gap-1.5 text-[12px]"
+              >
+                <Plus size={14} /> Add Role
+              </Button>
+            </div>
+
+            {experienceList.length === 0 ? (
+              <div className="p-4 rounded-[6px] border border-dashed border-border text-center text-fg-muted text-[13px]">
+                No work experience entries added yet. Click &quot;Add Role&quot; to add your professional experience.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {experienceList.map((exp, idx) => (
+                  <div
+                    key={idx}
+                    className="p-4 rounded-[6px] border border-border bg-surface-subtle/30 space-y-3"
+                  >
+                    <div className="flex items-center justify-between border-b border-border pb-2">
+                      <span className="text-[13px] font-semibold text-fg">
+                        {exp.title || 'Untitled Role'} {exp.company ? `at ${exp.company}` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeExperience(idx)}
+                        className="text-fg-muted hover:text-state-danger-fg text-[12px] flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <Trash2 size={13} /> Remove
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-fg-muted mb-1">
+                          Job Title / Role
+                        </label>
+                        <input
+                          type="text"
+                          value={exp.title}
+                          onChange={(e) => updateExperience(idx, { title: e.target.value })}
+                          placeholder="e.g. Flutter Developer"
+                          className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-fg-muted mb-1">
+                          Company / Organization
+                        </label>
+                        <input
+                          type="text"
+                          value={exp.company}
+                          onChange={(e) => updateExperience(idx, { company: e.target.value })}
+                          placeholder="e.g. Texol iCohort Business Ventures"
+                          className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-fg-muted mb-1">
+                          Start Date
+                        </label>
+                        <input
+                          type="text"
+                          value={exp.start_date || ''}
+                          onChange={(e) => updateExperience(idx, { start_date: e.target.value })}
+                          placeholder="MM/YYYY (e.g. 02/2025)"
+                          className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium uppercase tracking-wider text-fg-muted mb-1">
+                          End Date
+                        </label>
+                        <input
+                          type="text"
+                          value={exp.end_date || ''}
+                          onChange={(e) => updateExperience(idx, { end_date: e.target.value })}
+                          placeholder="MM/YYYY or Present"
+                          className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2 sm:pt-6">
+                        <input
+                          type="checkbox"
+                          id={`current-role-${idx}`}
+                          checked={Boolean(exp.current)}
+                          onChange={(e) => updateExperience(idx, { current: e.target.checked })}
+                          className="rounded border-border text-accent focus:ring-accent"
+                        />
+                        <label htmlFor={`current-role-${idx}`} className="text-[12px] text-fg select-none">
+                          Current Role
+                        </label>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-fg-muted mb-1">
+                        Company &amp; Domain Overview
+                      </label>
+                      <input
+                        type="text"
+                        value={exp.description || ''}
+                        onChange={(e) => updateExperience(idx, { description: e.target.value })}
+                        placeholder="Brief summary of company domain, team, or responsibilities"
+                        className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium uppercase tracking-wider text-fg-muted mb-1">
+                        Bullet Points &amp; Projects (one per line)
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={(exp.highlights || []).join('\n')}
+                        onChange={(e) => {
+                          const lines = e.target.value
+                            .split('\n')
+                            .map((l) => l.trim())
+                            .filter(Boolean);
+                          updateExperience(idx, { highlights: lines });
+                        }}
+                        placeholder="• Architected scalable mobile applications using Flutter and Dart&#10;• Integrated Firebase Crashlytics..."
+                        className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent font-sans"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="pt-4 border-t border-border flex items-center justify-end">
