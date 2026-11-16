@@ -9,6 +9,8 @@ export type PortalUrlType =
   | 'glassdoor'
   | 'instahyre'
   | 'foundit'
+  | 'whatjobs'
+  | 'bebee'
   | 'unknown';
 
 const PORTAL_PARAM_ALLOWLIST: Record<Exclude<PortalUrlType, 'unknown'>, Set<string>> = {
@@ -22,6 +24,8 @@ const PORTAL_PARAM_ALLOWLIST: Record<Exclude<PortalUrlType, 'unknown'>, Set<stri
   glassdoor: new Set(['joblistingid', 'jl']),
   instahyre: new Set(),
   foundit: new Set(),
+  whatjobs: new Set(['jobid', 'id']),
+  bebee: new Set(['id']),
 };
 
 export function detectPortalFromUrl(url: URL): PortalUrlType {
@@ -36,6 +40,8 @@ export function detectPortalFromUrl(url: URL): PortalUrlType {
   if (host.includes('glassdoor.')) return 'glassdoor';
   if (host.includes('instahyre.com')) return 'instahyre';
   if (host.includes('foundit.') || host.includes('monsterindia.com')) return 'foundit';
+  if (host.includes('whatjobs.')) return 'whatjobs';
+  if (host.includes('bebee.')) return 'bebee';
   return 'unknown';
 }
 

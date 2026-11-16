@@ -29,6 +29,8 @@ import {
   GLASSDOOR_EML_FIXTURE,
   INSTAHYRE_EML_FIXTURE,
   FOUNDIT_EML_FIXTURE,
+  WHATJOBS_EML_FIXTURE,
+  BEBEE_EML_FIXTURE,
 } from './fixtures.js';
 
 // In-memory mock SQLite/D1 database for shared unit tests
@@ -232,6 +234,20 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       expect(cleanTrackingUrl(unknownUrl)).toBe(
         'https://company.careers/jobs/42?reqId=9999&dept=engineering',
       );
+
+      // WhatJobs: keeps jobid / id
+      const whatjobsUrl =
+        'https://www.whatjobs.com/job/senior-flutter-developer-88776655?jobid=88776655&utm_source=alert&extra=drop';
+      expect(cleanTrackingUrl(whatjobsUrl)).toBe(
+        'https://www.whatjobs.com/job/senior-flutter-developer-88776655?jobid=88776655',
+      );
+
+      // beBee: keeps id
+      const bebeeUrl =
+        'https://bebee.com/job/flutter-engineer-998877?id=998877&utm_source=alert&extra=drop';
+      expect(cleanTrackingUrl(bebeeUrl)).toBe(
+        'https://bebee.com/job/flutter-engineer-998877?id=998877',
+      );
     });
 
     it('cleans tracking hash/fragment', () => {
@@ -252,6 +268,10 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       expect(isAllowedSender('jobalerts@naukri.com')).toBe(true);
       expect(isAllowedSender('alert@indeed.com')).toBe(true);
       expect(isAllowedSender('jobs@mail.indeed.com')).toBe(true);
+      expect(isAllowedSender('alerts@whatjobs.com')).toBe(true);
+      expect(isAllowedSender('notifications@in.whatjobs.com')).toBe(true);
+      expect(isAllowedSender('jobs@bebee.com')).toBe(true);
+      expect(isAllowedSender('alerts@us.bebee.com')).toBe(true);
     });
 
     it('rejects unknown sender domains', () => {
@@ -483,6 +503,55 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       expect(jobs[0]?.apply_url).toBe(
         'https://www.foundit.in/job/principal-software-engineer-cloud-12345',
       );
+    });
+
+    it('WhatJobs parser extracts jobs and preserves jobid parameter', async () => {
+      const email = await new PostalMime().parse(WHATJOBS_EML_FIXTURE);
+      const portal = detectPortal(email.from?.address ?? '');
+      expect(portal).toBe('whatjobs');
+
+      const parser = getParser(portal);
+      const jobs = parser.parse(email.html ?? '');
+
+      expect(jobs).toHaveLength(2);
+      expect(jobs[0]?.title).toBe('Senior Flutter Developer');
+      expect(jobs[0]?.company).toBe('Fintech Solutions Ltd');
+      expect(jobs[0]?.location).toBe('London, UK (Remote)');
+      expect(jobs[0]?.salary_raw).toBe('£75,000 - £90,000 / year');
+      expect(jobs[0]?.apply_url).toBe(
+        'https://www.whatjobs.com/job/senior-flutter-developer-88776655?jobid=88776655',
+      );
+
+      expect(jobs[1]?.title).toBe('Mobile App Architect (Flutter / Dart)');
+      expect(jobs[1]?.company).toBe('NeoTech Global');
+      expect(jobs[1]?.location).toBe('Bengaluru, India');
+      expect(jobs[1]?.salary_raw).toBe('₹25 - 35 LPA');
+      expect(jobs[1]?.apply_url).toBe(
+        'https://in.whatjobs.com/jobs/detail/mobile-app-architect-44332211?id=44332211',
+      );
+    });
+
+    it('beBee parser extracts jobs and preserves id parameter', async () => {
+      const email = await new PostalMime().parse(BEBEE_EML_FIXTURE);
+      const portal = detectPortal(email.from?.address ?? '');
+      expect(portal).toBe('bebee');
+
+      const parser = getParser(portal);
+      const jobs = parser.parse(email.html ?? '');
+
+      expect(jobs).toHaveLength(2);
+      expect(jobs[0]?.title).toBe('Flutter Engineer (Cross-Platform)');
+      expect(jobs[0]?.company).toBe('Global Mobility Corp');
+      expect(jobs[0]?.location).toBe('Dubai, UAE (Hybrid)');
+      expect(jobs[0]?.salary_raw).toBe('$90,000 - $110,000 / year');
+      expect(jobs[0]?.apply_url).toBe(
+        'https://bebee.com/job/flutter-engineer-cross-platform-998877?id=998877',
+      );
+
+      expect(jobs[1]?.title).toBe('Lead Dart Developer');
+      expect(jobs[1]?.company).toBe('Apex Apps India');
+      expect(jobs[1]?.location).toBe('Bengaluru');
+      expect(jobs[1]?.apply_url).toBe('https://bebee.com/in/jobs/lead-dart-developer-665544');
     });
 
     it('Fallback parser extracts job links from generic HTML', () => {

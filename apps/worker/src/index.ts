@@ -2240,6 +2240,8 @@ app.get('/api/sources', async (c) => {
     { name: 'glassdoor', kind: 'alert_email' },
     { name: 'instahyre', kind: 'alert_email' },
     { name: 'foundit', kind: 'alert_email' },
+    { name: 'whatjobs', kind: 'alert_email' },
+    { name: 'bebee', kind: 'alert_email' },
     // Public ATS JSON endpoints
     { name: 'greenhouse', kind: 'ats' },
     { name: 'lever', kind: 'ats' },

@@ -9,6 +9,8 @@ import { diceParser } from './dice.js';
 import { glassdoorParser } from './glassdoor.js';
 import { instahyreParser } from './instahyre.js';
 import { founditParser } from './foundit.js';
+import { whatjobsParser } from './whatjobs.js';
+import { bebeeParser } from './bebee.js';
 import { fallbackParser } from './fallback.js';
 
 export {
@@ -22,6 +24,8 @@ export {
   glassdoorParser,
   instahyreParser,
   founditParser,
+  whatjobsParser,
+  bebeeParser,
   fallbackParser,
 };
 
@@ -36,6 +40,8 @@ export const PORTAL_PARSERS: PortalParser[] = [
   glassdoorParser,
   instahyreParser,
   founditParser,
+  whatjobsParser,
+  bebeeParser,
 ];
 
 export function detectPortal(fromAddress: string): PortalType {
@@ -70,6 +76,10 @@ export function getParser(portal: PortalType): PortalParser {
       return instahyreParser;
     case 'foundit':
       return founditParser;
+    case 'whatjobs':
+      return whatjobsParser;
+    case 'bebee':
+      return bebeeParser;
     case 'fallback':
     default:
       return fallbackParser;

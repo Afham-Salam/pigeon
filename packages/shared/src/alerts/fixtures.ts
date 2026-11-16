@@ -303,3 +303,56 @@ Content-Type: text/html; charset=UTF-8
 </body>
 </html>
 `;
+
+export const WHATJOBS_EML_FIXTURE = `From: "WhatJobs Alerts" <alerts@whatjobs.com>
+To: "Alex Mercer" <alex.mercer@example.com>
+Subject: 2 new jobs matching 'Flutter Developer'
+Date: Tue, 04 Nov 2026 16:45:00 +0000
+Message-ID: <alert-whatjobs-008@whatjobs.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+<!DOCTYPE html>
+<html>
+<body>
+  <div class="job-card">
+    <a href="https://www.whatjobs.com/job/senior-flutter-developer-88776655?jobid=88776655&amp;utm_source=alert">Senior Flutter Developer</a>
+    <div class="company">Fintech Solutions Ltd</div>
+    <div class="location">London, UK (Remote)</div>
+    <div class="salary">£75,000 - £90,000 / year</div>
+  </div>
+  <div class="job-card">
+    <a href="https://in.whatjobs.com/jobs/detail/mobile-app-architect-44332211?id=44332211&amp;utm_campaign=digest">Mobile App Architect (Flutter / Dart)</a>
+    <div class="company-name">NeoTech Global</div>
+    <div class="location">Bengaluru, India</div>
+    <div class="salary">₹25 - 35 LPA</div>
+  </div>
+</body>
+</html>
+`;
+
+export const BEBEE_EML_FIXTURE = `From: "beBee Job Alerts" <jobs@bebee.com>
+To: "Alex Mercer" <alex.mercer@example.com>
+Subject: New Job Opportunity: Flutter Engineer
+Date: Tue, 04 Nov 2026 17:00:00 +0000
+Message-ID: <alert-bebee-009@bebee.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+<!DOCTYPE html>
+<html>
+<body>
+  <div class="job-listing">
+    <a href="https://bebee.com/job/flutter-engineer-cross-platform-998877?id=998877&amp;utm_medium=email">Flutter Engineer (Cross-Platform)</a>
+    <div class="employer">Global Mobility Corp</div>
+    <div class="location">Dubai, UAE (Hybrid)</div>
+    <div class="salary">$90,000 - $110,000 / year</div>
+  </div>
+  <div class="job-listing">
+    <a href="https://bebee.com/in/jobs/lead-dart-developer-665544?utm_source=alert">Lead Dart Developer</a>
+    <div class="company">Apex Apps India</div>
+    <div class="location">Bengaluru</div>
+  </div>
+</body>
+</html>
+`;

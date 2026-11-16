@@ -19,6 +19,8 @@ const BRAND_NAMES: Record<string, string> = {
   glassdoor: 'Glassdoor',
   instahyre: 'Instahyre',
   foundit: 'Foundit',
+  whatjobs: 'WhatJobs',
+  bebee: 'beBee',
   greenhouse: 'Greenhouse',
   lever: 'Lever',
   ashby: 'Ashby',

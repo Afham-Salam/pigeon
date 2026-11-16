@@ -11,6 +11,8 @@ export type PortalType =
   | 'glassdoor'
   | 'instahyre'
   | 'foundit'
+  | 'whatjobs'
+  | 'bebee'
   | 'fallback';
 
 export const ParsedAlertJobSchema = z.object({

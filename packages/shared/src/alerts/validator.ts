@@ -17,6 +17,11 @@ const ALLOWED_SENDER_DOMAINS = [
   'foundit.hk',
   'foundit.com',
   'monsterindia.com',
+  'whatjobs.com',
+  'whatjobs.co.uk',
+  'whatjobs.ca',
+  'whatjobs.in',
+  'bebee.com',
 ];
 
 /**
