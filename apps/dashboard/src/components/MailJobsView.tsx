@@ -84,6 +84,25 @@ export function MailJobsView({ apiBase = '', onNavigateTab }: Props): React.JSX.
   // Gmail sync
   const [syncingGmail, setSyncingGmail] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+  const [creatingAppJobId, setCreatingAppJobId] = useState<string | null>(null);
+
+  const handleViewInManualApply = async (jobId: string) => {
+    try {
+      setCreatingAppJobId(jobId);
+      await apiFetch(`${apiBase}/api/applications/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_id: jobId }),
+      });
+    } catch (err) {
+      console.warn('Could not ensure application exists:', err);
+    } finally {
+      setCreatingAppJobId(null);
+      if (onNavigateTab) {
+        onNavigateTab('manual-apply');
+      }
+    }
+  };
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -566,7 +585,8 @@ export function MailJobsView({ apiBase = '', onNavigateTab }: Props): React.JSX.
                         variant="secondary"
                         size="xs"
                         icon={ArrowRight}
-                        onClick={() => onNavigateTab('manual-apply')}
+                        loading={creatingAppJobId === job.id}
+                        onClick={() => void handleViewInManualApply(job.id)}
                       >
                         View in Manual Apply
                       </Button>

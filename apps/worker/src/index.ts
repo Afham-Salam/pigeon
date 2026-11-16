@@ -3384,7 +3384,9 @@ app.post('/api/dev/trigger/:action', async (c) => {
     const jobs = await c.env.DB.prepare(
       `SELECT j.id FROM jobs j
        LEFT JOIN applications a ON a.job_id = j.id
-       WHERE j.apply_route = 'auto_email' AND j.status = 'routed' AND a.id IS NULL`,
+       WHERE (j.apply_route IN ('auto_email', 'manual_portal', 'manual_review'))
+         AND j.status = 'routed'
+         AND a.id IS NULL`,
     ).all<{ id: string }>();
 
     let created = 0;
@@ -3708,6 +3710,26 @@ export default {
               scorer,
               config: { max_scored_per_day: maxScoredPerDay },
             });
+
+            // Enqueue application creation for all newly routed jobs that lack an application row
+            const pendingJobs = await env.DB.prepare(
+              `SELECT j.id FROM jobs j
+               LEFT JOIN applications a ON a.job_id = j.id
+               WHERE j.status = 'routed' AND a.id IS NULL
+               ORDER BY j.match_score DESC
+               LIMIT 50`,
+            ).all<{ id: string }>();
+
+            for (const rj of pendingJobs.results || []) {
+              try {
+                await env.JOBS_QUEUE.send({
+                  action: 'create_application',
+                  jobId: rj.id,
+                });
+              } catch (err) {
+                logger.error(`Error enqueuing create_application for job ${rj.id}`, err);
+              }
+            }
           }
         } catch (err) {
           logger.error('Error during score_and_route queue task', err);

@@ -38,9 +38,9 @@ export const indeedParser: PortalParser = {
       }
       seenUrls.add(applyUrl);
 
-      const afterLink = html.slice(match.index + match[0].length, match.index + 800);
+      const afterLink = html.slice(match.index + match[0].length, match.index + 1200);
       const nextCardBoundary = afterLink.search(
-        /<div class="job-result"|<div class="job"|<table|<tr|<a\b[^>]*href="[^"]*indeed\.com/i,
+        /<div class="job-result"|<div class="job"|<a\b[^>]*href="[^"]*(?:indeed\.com\/(?:viewjob|rc\/clk|job\/)|\/viewjob)/i,
       );
       const contextSnippet =
         nextCardBoundary !== -1 ? afterLink.slice(0, nextCardBoundary) : afterLink;
