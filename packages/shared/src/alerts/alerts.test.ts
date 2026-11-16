@@ -563,6 +563,39 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       expect(jobs[1]?.apply_url).toBe('https://bebee.com/in/jobs/lead-dart-developer-665544');
     });
 
+    it('beBee parser extracts jobs from card layouts with Arabic action buttons and notification tracking links', () => {
+      const arabicBebeeHtml = `
+        <div style="direction: rtl;">
+          <h1>تنبيهات beBee</h1>
+          <p>اليوم هناك 7 عروض جديدة تناسب بحثك.</p>
+          <div class="job-card" style="border: 1px solid #ccc; padding: 15px;">
+            <div class="company" style="font-size: 14px;">Halian | Managed Services, Recruitment Agency &amp; Contract Staffing</div>
+            <h3 class="title" style="font-size: 18px; font-weight: bold;">FinTech Security Testing Engineer — Web, Mobile &amp; API</h3>
+            <span class="location" style="color: #666;">Abu Dhabi</span>
+            <div style="margin-top: 10px;">
+              <a href="https://notification.bebee.com/c/12345/67890?id=12345&amp;utm_source=alert_email" style="background: orange; color: white; padding: 8px 16px;">
+                عرض الوظيفة
+              </a>
+            </div>
+          </div>
+          <div class="footer">
+            <a href="https://notification.bebee.com/unsubscribe?uid=999">إلغاء الاشتراك</a>
+          </div>
+        </div>
+      `;
+
+      const parser = getParser('bebee');
+      const jobs = parser.parse(arabicBebeeHtml);
+
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]?.title).toBe('FinTech Security Testing Engineer — Web, Mobile & API');
+      expect(jobs[0]?.company).toBe(
+        'Halian | Managed Services, Recruitment Agency & Contract Staffing',
+      );
+      expect(jobs[0]?.location).toBe('Abu Dhabi');
+      expect(jobs[0]?.apply_url).toBe('https://notification.bebee.com/c/12345/67890?id=12345');
+    });
+
     it('Fallback parser extracts job links from generic HTML', () => {
       const fallbackHtml = `
         <div>

@@ -2462,28 +2462,10 @@ app.post('/api/alerts/sync', async (c) => {
     }),
   );
 
-  let configuredForwardingAddress = appConfig.getIdentityConfig().alertForwardingAddress;
-  if (!configuredForwardingAddress) {
-    const profileRow = await c.env.DB.prepare('SELECT data FROM profile WHERE id = ?')
-      .bind('default')
-      .first<{ data: string }>();
-    if (profileRow?.data) {
-      try {
-        const profile = JSON.parse(profileRow.data) as { email?: string };
-        if (profile.email) {
-          configuredForwardingAddress = profile.email;
-        }
-      } catch {
-        // ignore
-      }
-    }
-  }
-
   const result = await pollGmailAlerts({
     db: c.env.DB,
     gmailSender,
     notifier,
-    configuredForwardingAddress,
   });
 
   if (result.newJobs > 0) {
@@ -3950,28 +3932,10 @@ export default {
               }),
             );
 
-            let configuredForwardingAddress = appConfig.getIdentityConfig().alertForwardingAddress;
-            if (!configuredForwardingAddress) {
-              const profileRow = await env.DB.prepare('SELECT data FROM profile WHERE id = ?')
-                .bind('default')
-                .first<{ data: string }>();
-              if (profileRow?.data) {
-                try {
-                  const profile = JSON.parse(profileRow.data) as { email?: string };
-                  if (profile.email) {
-                    configuredForwardingAddress = profile.email;
-                  }
-                } catch {
-                  // ignore
-                }
-              }
-            }
-
             const pollRes = await pollGmailAlerts({
               db: env.DB,
               gmailSender,
               notifier,
-              configuredForwardingAddress,
             });
 
             if (pollRes.newJobs > 0) {

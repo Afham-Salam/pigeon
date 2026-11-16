@@ -2,6 +2,12 @@ import type { PortalParser, ParsedAlertJob } from '../types.js';
 import { cleanTrackingUrl } from '../tracking-cleaner.js';
 import { stripHtml } from '../../sources/html-utils.js';
 
+const IS_BOILERPLATE_OR_ACTION_REGEX =
+  /^(?:view|see|apply|read|click|more|unsubscribe|settings|manage|bebee|privacy|terms|show|job|عرض|التقديم|تقديم|إلغاء|تعديل|أفضل تطابق|تنبيهات|وظائف|وظيفة)/i;
+
+const NON_JOB_LINK_REGEX =
+  /(?:unsubscribe|preferences|settings|privacy|terms|login|facebook|twitter|linkedin|instagram|app\.adjust\.com|apple\.com|google\.com\/store)/i;
+
 export const bebeeParser: PortalParser = {
   portal: 'bebee',
 
@@ -14,23 +20,64 @@ export const bebeeParser: PortalParser = {
     const jobs: ParsedAlertJob[] = [];
     if (!html) return jobs;
 
+    // Match links pointing to any bebee domain (e.g. notification.bebee.com, ae.bebee.com, bebee.com)
     const linkRegex =
-      /<a\b[^>]*href="([^"]*(?:bebee\.[a-z.]+\/(?:[a-z]{2}\/)?(?:jobs|job)\/|bebee\.com\/[^"]*(?:jobs|job)\/)[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+      /<a\b[^>]*href="([^"]*(?:bebee\.com|bebee\.[a-z.]+)[^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
 
     let match: RegExpExecArray | null;
     const seenUrls = new Set<string>();
 
     while ((match = linkRegex.exec(html)) !== null) {
       const rawHref = match[1] ?? '';
-      const rawTitle = match[2] ?? '';
-      const cleanTitle = stripHtml(rawTitle);
+      const rawLinkContent = match[2] ?? '';
 
-      if (
-        !cleanTitle ||
-        /^(view|see|apply|read|click|more|unsubscribe|settings|manage|bebee|privacy|terms)/i.test(
-          cleanTitle,
-        )
-      ) {
+      // Skip non-job links (unsubscribe, preferences, privacy, social media, app store)
+      if (NON_JOB_LINK_REGEX.test(rawHref)) {
+        continue;
+      }
+
+      const cleanText = stripHtml(rawLinkContent).trim();
+      const isActionOrBoilerplate = !cleanText || IS_BOILERPLATE_OR_ACTION_REGEX.test(cleanText);
+
+      // Card context: Look before the link (up to 1200 chars) and after the link (up to 800 chars)
+      const beforeLink = html.slice(Math.max(0, match.index - 1200), match.index);
+      const afterLink = html.slice(match.index + match[0].length, match.index + 800);
+
+      let title = '';
+      let company = 'Unknown';
+      let location: string | null = null;
+      let salaryRaw: string | null = null;
+
+      if (!isActionOrBoilerplate && cleanText.length > 3 && cleanText.length < 150) {
+        // The link text itself is the job title
+        title = cleanText;
+      } else {
+        // The link is an action button (e.g., "عرض الوظيفة" / "View Job") or image
+        // Search for title heading in the preceding card snippet
+        const titleMatch =
+          beforeLink.match(
+            /<(?:h[1-4]|div|p|strong|span|b)[^>]*class="[^"]*(?:title|job-title|heading|position|jobname)[^"]*"[^>]*>([\s\S]*?)<\/(?:h[1-4]|div|p|strong|span|b)>/i,
+          ) ||
+          beforeLink.match(/<(?:h[1-4]|strong)[^>]*>([\s\S]*?)<\/(?:h[1-4]|strong)>/i) ||
+          beforeLink.match(
+            /(?:<b[^>]*>|<span[^>]*style="[^"]*font-weight:\s*(?:bold|[6-9]00)[^"]*"[^>]*>)([\s\S]*?)<\/(?:b|span)>/i,
+          );
+
+        if (titleMatch?.[1]) {
+          const candidateTitle = stripHtml(titleMatch[1]).trim();
+          if (
+            candidateTitle &&
+            candidateTitle.length > 3 &&
+            candidateTitle.length < 150 &&
+            !IS_BOILERPLATE_OR_ACTION_REGEX.test(candidateTitle)
+          ) {
+            title = candidateTitle;
+          }
+        }
+      }
+
+      // If no valid title could be extracted, skip this link
+      if (!title) {
         continue;
       }
 
@@ -40,54 +87,54 @@ export const bebeeParser: PortalParser = {
       }
       seenUrls.add(applyUrl);
 
-      const afterLink = html.slice(match.index + match[0].length, match.index + 800);
-      const nextCardBoundary = afterLink.search(
-        /<div class="job|<table|<tr|<a\b[^>]*href="[^"]*bebee/i,
-      );
-      const contextSnippet =
-        nextCardBoundary !== -1 ? afterLink.slice(0, nextCardBoundary) : afterLink;
+      // Search for company, location, and salary in the card context.
+      // If the link text was the title, details appear in afterLink.
+      // If the link was an action button, details appear in beforeLink.
+      const snippet = title === cleanText ? afterLink : beforeLink;
 
-      let company = 'Unknown';
       const companyMatch =
-        contextSnippet.match(
-          /(?:class="[^"]*(?:company|company-name|employer|comp-name)[^"]*"[^>]*>|<strong[^>]*>|<span[^>]*class="[^"]*company[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|strong|p|a)>/i,
+        snippet.match(
+          /(?:class="[^"]*(?:company|company-name|employer|comp-name)[^"]*"[^>]*>|<strong[^>]*>|<span[^>]*class="[^"]*company[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|strong|p|a|td)>/i,
         ) ||
-        contextSnippet.match(
-          /<\/a>[\s\S]*?<(?:span|div|p|td)[^>]*>([\s\S]*?)<\/(?:span|div|p|td)>/i,
+        snippet.match(/<\/a>[\s\S]*?<(?:span|div|p|td)[^>]*>([\s\S]*?)<\/(?:span|div|p|td)>/i) ||
+        snippet.match(
+          /([A-Z][a-zA-Z0-9&.,\s'-]{2,50})\s*(?:\||\s–\s|\s-\s)\s*(?:Managed Services|Recruitment|Staffing|Consulting|Technologies|Pvt|Ltd|Inc|LLC|Solutions)/i,
         );
 
-      if (companyMatch?.[1]) {
-        const candidate = stripHtml(companyMatch[1]).trim();
-        if (candidate && candidate !== cleanTitle && candidate.length < 100) {
-          company = candidate;
+      if (companyMatch) {
+        const rawComp = companyMatch[1] ?? companyMatch[0];
+        const cleanComp = stripHtml(rawComp).trim();
+        if (cleanComp && cleanComp !== title && cleanComp.length < 100) {
+          company = cleanComp;
         }
       }
 
-      let location: string | null = null;
+      // Search for location
       const locationMatch =
-        contextSnippet.match(
-          /(?:class="[^"]*(?:location|city|job-location)[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|p)>/i,
+        snippet.match(
+          /(?:class="[^"]*(?:location|city|job-location)[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|p|td)>/i,
         ) ||
-        contextSnippet.match(
-          /(?:[A-Z][a-zA-Z\s.-]+,\s*[A-Z]{2}(?:\s+\(Hybrid\)|\s+\(Remote\))?|\bRemote\b|\bHybrid\b|London|Bengaluru|Bangalore|Delhi|Mumbai|Dubai)/i,
+        snippet.match(
+          /(?:Abu Dhabi|Dubai|Sharjah|Riyadh|Doha|Bengaluru|Bangalore|Delhi|Mumbai|London|New York|\bRemote\b|\bHybrid\b|[A-Z][a-zA-Z\s.-]+,\s*[A-Z]{2}(?:\s+\(Hybrid\)|\s+\(Remote\))?)/i,
         );
 
       if (locationMatch) {
         const rawLoc = locationMatch[1] ?? locationMatch[0];
         const cleanLoc = stripHtml(rawLoc).trim();
-        if (cleanLoc && cleanLoc !== cleanTitle && cleanLoc !== company) {
+        if (cleanLoc && cleanLoc !== title && cleanLoc !== company) {
           location = cleanLoc;
         }
       }
 
-      let salaryRaw: string | null = null;
+      // Search for salary
       const salaryMatch =
-        contextSnippet.match(
+        snippet.match(
           /(?:class="[^"]*(?:salary|salary-info)[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|p)>/i,
         ) ||
-        contextSnippet.match(
-          /([£$€₹]?\s*[\d,]+(?:\.\d+)?(?:\s*k)?\s*(?:[-–to/]\s*[£$€₹]?\s*[\d,]+(?:\.\d+)?(?:\s*k)?)?\s*(?:LPA|Lacs|Lakhs?|\/\s*(?:yr|year|annum|hr|hour)|\bper\s+(?:year|annum|hour)\b|\ba\s+year\b))/i,
+        snippet.match(
+          /([£$€₹AED\s]*[\d,]+(?:\.\d+)?(?:\s*k)?\s*(?:[-–to/]\s*[£$€₹AED\s]*[\d,]+(?:\.\d+)?(?:\s*k)?)?\s*(?:AED|LPA|Lacs|Lakhs?|\/\s*(?:yr|year|month|annum|hr|hour)|\bper\s+(?:year|month|annum|hour)\b|\ba\s+year\b))/i,
         );
+
       if (salaryMatch) {
         const rawSal = salaryMatch[1] ?? salaryMatch[0];
         const candidate = stripHtml(rawSal).trim();
@@ -97,7 +144,7 @@ export const bebeeParser: PortalParser = {
       }
 
       jobs.push({
-        title: cleanTitle,
+        title,
         company,
         location,
         apply_url: applyUrl,

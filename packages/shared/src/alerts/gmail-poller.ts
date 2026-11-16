@@ -7,7 +7,6 @@ export interface PollGmailAlertsOptions {
   db: D1LikeDatabase;
   gmailSender: GmailSender;
   notifier?: Notifier | undefined;
-  configuredForwardingAddress?: string | undefined;
   nowIso?: string | undefined;
   query?: string | undefined;
   maxMessages?: number | undefined;
@@ -38,7 +37,6 @@ export async function pollGmailAlerts(
     db,
     gmailSender,
     notifier,
-    configuredForwardingAddress,
     nowIso = new Date().toISOString(),
     query = DEFAULT_GMAIL_ALERT_QUERY,
     maxMessages = 20,
@@ -82,14 +80,21 @@ export async function pollGmailAlerts(
 
   for (const msg of messages) {
     try {
-      // 1. Skip if already processed in events
+      // 1. Skip if already processed in events (unless it was previously dropped due to forwarding address check)
       const existing = await db
-        .prepare(`SELECT entity_id FROM events WHERE entity = ? AND entity_id = ?`)
+        .prepare(`SELECT entity_id, payload FROM events WHERE entity = ? AND entity_id = ?`)
         .bind('gmail_alert', msg.id)
-        .first<{ entity_id: string }>();
+        .first<{ entity_id: string; payload?: string }>();
 
       if (existing) {
-        continue;
+        try {
+          const payload = JSON.parse(existing.payload || '{}') as { dropReason?: string };
+          if (payload.dropReason !== 'invalid_forwarding_address') {
+            continue;
+          }
+        } catch {
+          continue;
+        }
       }
 
       // 2. Fetch raw email bytes
@@ -98,10 +103,9 @@ export async function pollGmailAlerts(
         continue;
       }
 
-      // 3. Ingest into Pigeon database
+      // 3. Ingest into Pigeon database (direct mailbox ingestion, no forwarding envelope)
       const ingestRes = await ingestAlertEmail(rawBytes, {
         db,
-        configuredForwardingAddress,
         notifier,
         nowIso,
       });

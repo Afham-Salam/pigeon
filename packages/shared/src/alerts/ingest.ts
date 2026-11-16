@@ -96,43 +96,46 @@ export async function ingestAlertEmail(
   }
 
   // 3. Strictly validate that the envelope sender equals the configured forwarding address
-  const isAuthorized = isAuthorizedForwarding({
-    envelopeSender,
-    configuredAddress: configuredForwardingAddress,
-  });
+  // (Applicable only to forwarded emails with an SMTP envelope, not direct Gmail API polling)
+  if (envelope) {
+    const isAuthorized = isAuthorizedForwarding({
+      envelopeSender,
+      configuredAddress: configuredForwardingAddress,
+    });
 
-  if (!isAuthorized) {
-    const dropEventId = crypto.randomUUID();
-    await db
-      .prepare(
-        `INSERT INTO events (id, entity, entity_id, type, payload, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        dropEventId,
-        'email_alert',
-        dropEventId,
-        'email_dropped',
-        JSON.stringify({
-          reason: 'invalid_forwarding_address',
-          from: envelopeSender || originalFromAddress,
-          to: recipientAddress,
-        }),
-        nowIso,
-      )
-      .run();
+    if (!isAuthorized) {
+      const dropEventId = crypto.randomUUID();
+      await db
+        .prepare(
+          `INSERT INTO events (id, entity, entity_id, type, payload, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          dropEventId,
+          'email_alert',
+          dropEventId,
+          'email_dropped',
+          JSON.stringify({
+            reason: 'invalid_forwarding_address',
+            from: envelopeSender || originalFromAddress,
+            to: recipientAddress,
+          }),
+          nowIso,
+        )
+        .run();
 
-    return {
-      portal: 'fallback',
-      dropped: true,
-      dropReason: 'invalid_forwarding_address',
-      jobsFound: 0,
-      newJobs: 0,
-      duplicates: 0,
-      emptyStreak: 0,
-      isSuspect: false,
-      untrusted: false,
-    };
+      return {
+        portal: 'fallback',
+        dropped: true,
+        dropReason: 'invalid_forwarding_address',
+        jobsFound: 0,
+        newJobs: 0,
+        duplicates: 0,
+        emptyStreak: 0,
+        isSuspect: false,
+        untrusted: false,
+      };
+    }
   }
 
   // 4. Detect portal from the original From: address
