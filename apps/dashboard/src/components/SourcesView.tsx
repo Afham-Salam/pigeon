@@ -28,6 +28,8 @@ type FilterKind = 'all' | 'alert_email' | 'ats' | 'api';
 export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
   const [sources, setSources] = useState<SourceStatusItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedFilter, setSelectedFilter] = useState<FilterKind>('all');
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
@@ -59,6 +61,24 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setResetting(false);
+    }
+  };
+
+  const handleSyncSources = async () => {
+    try {
+      setSyncing(true);
+      setSyncFeedback(null);
+      const res = await apiFetch(`${apiBase}/api/sources/sync`, { method: 'POST' });
+      if (res.ok) {
+        setSyncFeedback('Ingestion tasks enqueued for all sources! New jobs are being fetched.');
+        setTimeout(() => setSyncFeedback(null), 5000);
+      } else {
+        setSyncFeedback('Failed to trigger ingestion.');
+      }
+    } catch {
+      setSyncFeedback('Failed to trigger ingestion.');
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -142,6 +162,15 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
           >
             {loading ? 'Refreshing...' : 'Refresh Status'}
           </Button>
+          <Button
+            variant="primary"
+            size="sm"
+            loading={syncing}
+            onClick={() => void handleSyncSources()}
+            className="w-full sm:w-auto"
+          >
+            Fetch Jobs Now
+          </Button>
           {lastRefreshed && (
             <span className="text-[11px] text-fg-muted font-mono hidden sm:inline">
               Updated {lastRefreshed.toLocaleTimeString()}
@@ -153,6 +182,12 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
       {resetSuccess && (
         <div className="p-3 bg-state-success-bg border border-state-success-border text-state-success-fg text-[13px] rounded-[6px]">
           {resetSuccess}
+        </div>
+      )}
+
+      {syncFeedback && (
+        <div className="bg-state-ok-bg border border-state-ok-border text-state-ok-fg p-3 rounded-[6px] text-[13px] flex items-center justify-between">
+          <span>{syncFeedback}</span>
         </div>
       )}
 

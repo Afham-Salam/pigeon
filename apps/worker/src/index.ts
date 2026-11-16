@@ -2259,6 +2259,19 @@ app.post('/api/sources/reset', async (c) => {
   return c.json({ ok: true, message: 'Circuit breakers reset successfully' });
 });
 
+// POST /api/sources/sync: Triggers immediate ingestion across all enabled sources
+app.post('/api/sources/sync', async (c) => {
+  const enabledSources = await getEnabledSources(c.env.CONFIG);
+  for (const source of enabledSources) {
+    await c.env.JOBS_QUEUE.send({ source });
+  }
+  return c.json({
+    ok: true,
+    message: `Triggered ingestion for ${enabledSources.length} sources`,
+    sources: enabledSources,
+  });
+});
+
 // 8. GET /api/settings: Profile, Dry Run, Kill Switch, Resumes
 app.get('/api/settings', async (c) => {
   const env = c.get('validatedEnv');
@@ -3423,7 +3436,7 @@ export default {
           const userAgent = identity.userAgentContactEmail
             ? `Pigeon/1.0 (Job Application Assistant; mailto:${identity.userAgentContactEmail}; +https://github.com/pigeon)`
             : undefined;
-          await ingestSource(body.source, {
+          const ingestRes = await ingestSource(body.source, {
             db: env.DB,
             kv: env.CONFIG,
             secrets: {
@@ -3432,6 +3445,9 @@ export default {
             },
             userAgent,
           });
+          if (ingestRes && ingestRes.newJobs > 0) {
+            await env.JOBS_QUEUE.send({ action: 'score_and_route' });
+          }
         } catch (err) {
           // Log error so that one source failure does not break other sources in the batch
           logger.error(`Ingestion error for source ${body.source}`, err);
