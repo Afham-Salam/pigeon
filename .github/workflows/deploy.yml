@@ -91,7 +91,7 @@ jobs:
           VITE_API_BASE: https://pigeon-worker-prod.pigeon-worker.workers.dev
 
       - name: Deploy Dashboard to Cloudflare Pages (Production)
-        run: pnpm --filter @pigeon/worker exec wrangler pages deploy apps/dashboard/dist --project-name pigeon-dashboard --branch main --commit-dirty=true
+        run: pnpm --filter @pigeon/worker exec wrangler pages deploy ../dashboard/dist --project-name pigeon-dashboard --branch main --commit-dirty=true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
