@@ -2360,7 +2360,7 @@ describe('Google OAuth, Health & Gmail Sender Suite', () => {
         resumesBucket: dummyR2,
         gmailSender: mockSender,
         profile: mockProfile,
-        dryRun: true,
+        dryRun: false,
         killSwitch: false,
         nowMs: sendTimeMs,
         application: targetApp,

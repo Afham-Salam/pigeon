@@ -86,7 +86,7 @@ max_batch_timeout = 5
 
 [env.prod]
 name = "pigeon-worker-prod"
-vars = { ENV = "prod", DRY_RUN = "false", DEV_RECIPIENT_ALLOWLIST = "" }
+vars = { ENV = "prod", DRY_RUN = "true", DEV_RECIPIENT_ALLOWLIST = "", DASHBOARD_ORIGIN = "https://pigeon-dashboard-4jp.pages.dev" }
 
 [env.prod.ai]
 binding = "AI"
@@ -94,11 +94,11 @@ binding = "AI"
 [[env.prod.d1_databases]]
 binding = "DB"
 database_name = "pigeon-db-prod"
-database_id = "343fe5de-98b8-4526-80b0-372d7fa933f0"
+database_id = "9bfb9657-5fa6-4a83-909b-330a8d6eea18"
 
 [[env.prod.kv_namespaces]]
 binding = "CONFIG"
-id = "dbaa227e023b4dccab1049cea786d514"
+id = "a484b1b7efb0456ba433f2802071f829"
 
 [[env.prod.queues.producers]]
 binding = "JOBS_QUEUE"
