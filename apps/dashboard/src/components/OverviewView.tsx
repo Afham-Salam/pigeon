@@ -4,7 +4,7 @@ import { ConfirmationModal } from './ConfirmationModal.js';
 import { AlertBanner } from './ui/AlertBanner.js';
 import { MetricCard } from './ui/MetricCard.js';
 import { Button } from './ui/Button.js';
-import { apiFetch, getGoogleAuthStartUrl } from '../api.js';
+import { apiFetch, getGoogleAuthStartUrl, readApiJson } from '../api.js';
 
 export interface CronJobInfo {
   id: string;
@@ -89,7 +89,7 @@ export function OverviewView({
       if (!res.ok) {
         throw new Error(`Failed to load overview (${res.status})`);
       }
-      const json = (await res.json()) as OverviewData;
+      const json = await readApiJson<OverviewData>(res);
       setData(json);
 
       // Check setup status

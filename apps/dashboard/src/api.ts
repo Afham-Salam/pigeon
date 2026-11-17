@@ -9,6 +9,26 @@
 export const AUTH_TOKEN_KEY = 'pigeon_admin_token';
 
 /**
+ * Parse JSON responses without leaking the browser's opaque "Unexpected token <"
+ * error when a dashboard/static-host fallback returns HTML instead of API data.
+ */
+export async function readApiJson<T>(response: Response): Promise<T> {
+  const contentType = response.headers.get('content-type') || '';
+  const body = await response.text();
+  if (!contentType.toLowerCase().includes('application/json')) {
+    const preview = body.trim().slice(0, 120);
+    throw new Error(
+      `API returned non-JSON content (${response.status}). Check that the dashboard API URL points to the Pigeon Worker, not the dashboard site.${preview ? ` Response: ${preview}` : ''}`,
+    );
+  }
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    throw new Error(`API returned invalid JSON (${response.status}).`);
+  }
+}
+
+/**
  * Retrieves the stored admin password / token from localStorage.
  */
 export function getStoredToken(): string | null {
