@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { env } from 'cloudflare:test';
+import { applyD1Migrations, env } from 'cloudflare:test';
 import { http, HttpResponse } from 'msw';
 import worker, { app } from './index.js';
 import { validateWorkerEnv, type Bindings } from './env.js';
@@ -9,6 +9,35 @@ import type { HealthResponse, ErrorResponse } from '@pigeon/shared';
 const workerEnv = env as unknown as Bindings;
 
 describe('Pigeon Worker', () => {
+  describe('scheduled queue work', () => {
+    it.each([
+      ['0 */3 * * *', [{ source: 'greenhouse' }, { source: 'lever' }]],
+      ['*/10 * * * *', [{ action: 'score_and_route' }, { action: 'sync_sheet' }]],
+      ['*/15 * * * *', [{ action: 'poll_inbox' }, { action: 'sync_gmail_alerts' }]],
+      ['0 0 * * *', []],
+    ] as const)('only enqueues tasks assigned to %s', async (cron, expected) => {
+      const { TEST_MIGRATIONS } = env as unknown as {
+        TEST_MIGRATIONS: Parameters<typeof applyD1Migrations>[1];
+      };
+      await applyD1Migrations(workerEnv.DB, TEST_MIGRATIONS);
+      await workerEnv.CONFIG.put('sources:enabled', JSON.stringify(['greenhouse', 'lever']));
+      const send = vi.fn<Queue['send']>().mockResolvedValue({
+        metadata: { metrics: { backlogCount: 0, backlogBytes: 0 } },
+      });
+      await worker.scheduled(
+        { cron },
+        {
+          ...workerEnv,
+          GOOGLE_CLIENT_ID: 'test-cron-client-id',
+          GOOGLE_CLIENT_SECRET: 'test-cron-secret',
+          GOOGLE_TOKEN_ENCRYPTION_KEY: 'test-cron-encryption-key',
+          JOBS_QUEUE: { send, sendBatch: vi.fn(), metrics: vi.fn() } as unknown as Queue,
+        },
+      );
+      expect(send.mock.calls.map(([message]) => message)).toEqual(expected);
+    });
+  });
+
   describe('GET /health', () => {
     it('returns 200 with dryRun: true when DRY_RUN is "true"', async () => {
       const testEnv: Bindings = {

@@ -79,6 +79,10 @@ import {
   type ResumeSummary,
 } from '@pigeon/shared';
 import { validateWorkerEnv, type Bindings, type ValidatedEnv } from './env.js';
+import {
+  claimApplicationCreation,
+  releaseApplicationCreationClaim,
+} from './application-queue-claims.js';
 
 type Variables = {
   validatedEnv: ValidatedEnv;
@@ -4069,13 +4073,47 @@ async function ensureD1ReadIndexes(env: Bindings): Promise<void> {
 
 export default {
   fetch: app.fetch,
-  async scheduled(_event: ScheduledEvent, env: Bindings): Promise<void> {
-    await ensureD1ReadIndexes(env);
+  async scheduled({ cron: cronKey }: Pick<ScheduledEvent, 'cron'>, env: Bindings): Promise<void> {
     const nowIso = new Date().toISOString();
-    const cronKey = _event?.cron || '0 */3 * * *';
 
-    await recordCronExecution(env.CONFIG, env.DB, cronKey, nowIso);
+    try {
+      const raw = await env.CONFIG.get('cron:last_runs');
+      const runs = raw ? JSON.parse(raw) : {};
+      runs[cronKey] = nowIso;
+      await env.CONFIG.put('cron:last_runs', JSON.stringify(runs));
+    } catch (err) {
+      logger.error('Error recording cron last run in KV', err);
+    }
 
+    try {
+      await env.DB.prepare(
+        `INSERT INTO events (id, entity, entity_id, type, payload, created_at)
+         VALUES (?, 'system', 'cron', 'cron_executed', ?, ?)`,
+      )
+        .bind(crypto.randomUUID(), JSON.stringify({ cron: cronKey }), nowIso)
+        .run();
+    } catch {
+      // Non-blocking
+    }
+
+    if (cronKey === '0 */3 * * *') {
+      const enabledSources = await getEnabledSources(env.CONFIG);
+      for (const source of enabledSources) {
+        await env.JOBS_QUEUE.send({ source });
+      }
+    }
+    // Housekeeping: expire 30-day-old manual_pending items
+    await expireStaleManualPending(env.DB);
+    // Housekeeping: purge >90-day job descriptions for unapplied jobs and >14-day filtered_out noise
+    await purgeExpiredJobDescriptions({ db: env.DB });
+    await purgeOldFilteredJobs({ db: env.DB });
+    const appConfig = await getConfig(env, env.DB);
+    // Send daily digest & check failure rate alert
+    const notifier = await createWorkerNotifier(env, appConfig);
+    await sendManualDailyDigest({ db: env.DB, notifier });
+    await checkFailureRateAlert({ db: env.DB, notifier });
+
+    // Score and route pending jobs on the 10-minute cron trigger (*/10 * * * *)
     if (cronKey === '*/10 * * * *') {
       try {
         await executeScoreCron(env);
@@ -4085,13 +4123,25 @@ export default {
       return;
     }
 
-    if (cronKey === '*/15 * * * *') {
+    const hasGoogleOAuth = appConfig.hasGoogleOAuth();
+
+    // Sync to Google Sheets on the 10-minute trigger if OAuth is configured.
+    if (cronKey === '*/10 * * * *' && hasGoogleOAuth) {
       try {
         await executeInboxCron(env);
       } catch (err) {
-        logger.error('Error during */15 * * * * scheduled inbox cron', err);
+        logger.error('Error enqueuing scheduled sheet sync', err);
       }
-      return;
+    }
+
+    // Poll Gmail on the 15-minute trigger if OAuth is configured.
+    if (cronKey === '*/15 * * * *' && hasGoogleOAuth) {
+      try {
+        await env.JOBS_QUEUE.send({ action: 'poll_inbox' });
+        await env.JOBS_QUEUE.send({ action: 'sync_gmail_alerts' });
+      } catch (err) {
+        logger.error('Error enqueuing scheduled inbox poll', err);
+      }
     }
 
     // Default / 3-hour cron ('0 */3 * * *'): ingestion + housekeeping
@@ -4167,16 +4217,33 @@ export default {
               }
             }
 
-            // Enqueue application creation ONLY for jobs routed in this batch (avoids re-scanning and
-            // re-enqueuing the same routed jobs across chained score_and_route batches)
-            for (const jobId of pipelineStats.routedJobIds || []) {
+            // Enqueue application creation for newly routed jobs that lack an application row
+            const pendingJobs = await env.DB.prepare(
+              `SELECT j.id FROM jobs j
+               LEFT JOIN applications a ON a.job_id = j.id
+               WHERE j.status = 'routed' AND a.id IS NULL
+               ORDER BY j.match_score DESC
+               LIMIT 20`,
+            ).all<{ id: string }>();
+
+            for (const rj of pendingJobs.results || []) {
+              let claimToken: string | null = null;
               try {
+                claimToken = await claimApplicationCreation(env.DB, rj.id);
+                if (!claimToken) continue;
+
                 await env.JOBS_QUEUE.send({
                   action: 'create_application',
-                  jobId,
+                  jobId: rj.id,
+                  claimToken,
                 });
               } catch (err) {
-                logger.error(`Error enqueuing create_application for job ${jobId}`, err);
+                if (claimToken) {
+                  await releaseApplicationCreationClaim(env.DB, rj.id, claimToken).catch(
+                    () => undefined,
+                  );
+                }
+                logger.error(`Error enqueuing create_application for job ${rj.id}`, err);
               }
             }
           }
@@ -4188,8 +4255,9 @@ export default {
         body.action === 'create_application' &&
         typeof (body as { jobId?: string }).jobId === 'string'
       ) {
+        const jobId = (body as { jobId: string }).jobId;
+        const claimToken = (body as { claimToken?: unknown }).claimToken;
         try {
-          const jobId = (body as { jobId: string }).jobId;
           const profileRow = await env.DB.prepare('SELECT data FROM profile WHERE id = ?')
             .bind('default')
             .first<{ data: string }>();
@@ -4213,6 +4281,10 @@ export default {
           }
         } catch (err) {
           logger.error('Error during create_application queue task', err);
+        } finally {
+          if (typeof claimToken === 'string') {
+            await releaseApplicationCreationClaim(env.DB, jobId, claimToken);
+          }
         }
       } else if (
         body &&

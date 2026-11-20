@@ -79,6 +79,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Apply D1 migrations (Production)
+        run: pnpm --filter @pigeon/worker exec wrangler d1 migrations apply pigeon-db-prod --remote --env prod
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Deploy Worker (Production)
         run: pnpm --filter @pigeon/worker exec wrangler deploy --env prod
         env:

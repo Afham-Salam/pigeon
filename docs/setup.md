@@ -105,8 +105,12 @@ The check verifies:
 Run database migrations against your remote production D1 database:
 
 ```powershell
-pnpm --filter @pigeon/worker exec wrangler d1 migrations apply pigeon-db-prod --remote
+pnpm --filter @pigeon/worker exec wrangler d1 migrations apply pigeon-db-prod --remote --env prod
 ```
+
+The GitHub Actions deployment applies unapplied production migrations before deploying the Worker. Its
+`CLOUDFLARE_API_TOKEN` must include D1 Edit permission in addition to the Workers and Pages
+permissions used by deployment.
 
 ### Deploy the Backend Worker
 
