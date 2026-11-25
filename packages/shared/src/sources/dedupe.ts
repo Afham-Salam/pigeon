@@ -75,18 +75,24 @@ export function normalizeLocationBucket(
 /**
  * Computes deterministic dedupe_key = SHA256(company_normalized + normalized title + location bucket).
  * Guarantees cross-source idempotency for identical job postings.
+ * When the company is untrackable (e.g. 'Unknown') and a fallback identifier (such as apply_url)
+ * is provided, includes it so distinct postings at different companies do not collide.
  */
 export async function computeDedupeKey(
   company: string,
   title: string,
   location?: string | null,
   remote?: boolean | null,
+  fallbackIdentifier?: string | null,
 ): Promise<string> {
   const compNorm = normalizeCompanyName(company);
   const titleNorm = normalizeJobTitle(title);
   const locBucket = normalizeLocationBucket(location, remote);
 
-  const rawKey = `${compNorm}|${titleNorm}|${locBucket}`;
+  const rawKey =
+    !isTrackableCompany(compNorm) && fallbackIdentifier?.trim()
+      ? `${compNorm}|${titleNorm}|${locBucket}|${fallbackIdentifier.trim()}`
+      : `${compNorm}|${titleNorm}|${locBucket}`;
   const encoded = new TextEncoder().encode(rawKey);
 
   // WebCrypto SHA-256

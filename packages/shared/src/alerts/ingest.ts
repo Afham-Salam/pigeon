@@ -171,7 +171,7 @@ export async function ingestAlertEmail(
 
     const salary = job.salary_raw ? parseSalary(job.salary_raw) : null;
 
-    const dedupeKey = await computeDedupeKey(cleanCompany, cleanTitle, locBucket, isRemote);
+    const dedupeKey = await computeDedupeKey(cleanCompany, cleanTitle, locBucket, isRemote, applyUrl);
 
     // Check if job already exists in D1
     const existing = await db

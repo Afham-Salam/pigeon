@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { LLMClient } from '../types.js';
 import type { Profile } from '../profile.js';
+import type { JobSourceKind } from '../schema.js';
 import { wrapUntrusted } from '../safety.js';
 
 export const ScorerOutputSchema = z.object({
@@ -27,6 +28,7 @@ export interface ScoredJobResult {
 export interface ScorableJob {
   title: string;
   company: string;
+  source_kind?: JobSourceKind | undefined;
   location?: string | null | undefined;
   description: string;
   salary_raw?: string | null | undefined;
@@ -72,8 +74,11 @@ You must also check for any scam or red flags in the posting:
 - Asks for application fee, training fee, equipment deposit, or payment (code: FEE_OR_DEPOSIT)
 - Asks for sensitive ID documents, passport, SSN, or bank account details upfront (code: ID_DOCUMENTS)
 - Contact is exclusively via WhatsApp, Telegram, or personal messaging with no corporate email or website (code: WHATSAPP_OR_TELEGRAM_ONLY)
-- Unrealistic pay or claims of quick wealth (code: UNREALISTIC_PAY)
-- No identifiable or verifiable company name (code: NO_COMPANY)
+- Unrealistic pay or claims of quick wealth (code: UNREALISTIC_PAY)${
+    job.source_kind === 'alert_email'
+      ? `\nNote: This job was parsed from a known job-portal email alert digest where company name or full job description may be omitted; do NOT flag NO_COMPANY or penalize the fit score solely because Company is 'Unknown' or the digest snippet is brief.`
+      : `\n- No identifiable or verifiable company name (code: NO_COMPANY)`
+  }
 
 Return ONLY a valid JSON object matching this exact schema:
 {

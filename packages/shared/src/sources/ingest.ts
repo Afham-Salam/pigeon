@@ -153,6 +153,7 @@ export async function ingestSource(
         normalized.title,
         normalized.location,
         normalized.remote,
+        normalized.apply_url || normalized.source_job_id,
       );
 
       // Check if job already exists in D1

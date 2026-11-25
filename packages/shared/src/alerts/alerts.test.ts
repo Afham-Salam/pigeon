@@ -801,6 +801,31 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       }
     });
 
+    it('does not collide dedupe keys for different Unknown-company postings with the same title', async () => {
+      const { db, jobs } = createMockDb();
+      const rawEml = `From: "Indeed Job Alert" <alert@indeed.com>
+To: "Alex Mercer" <alex.mercer@example.com>
+Subject: 2 new jobs for 'Flutter Developer'
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+<html><body>
+  <a href="https://www.indeed.com/viewjob?jk=aaa111">Flutter Developer</a>
+  <a href="https://www.indeed.com/viewjob?jk=bbb222">Flutter Developer</a>
+</body></html>`;
+
+      const res1 = await ingestAlertEmail(rawEml, { db });
+      expect(res1.jobsFound).toBe(2);
+      expect(res1.newJobs).toBe(2);
+      expect(res1.duplicates).toBe(0);
+      expect(jobs.size).toBe(2);
+
+      // Re-ingesting the same email still deduplicates both postings
+      const res2 = await ingestAlertEmail(rawEml, { db });
+      expect(res2.newJobs).toBe(0);
+      expect(res2.duplicates).toBe(2);
+    });
+
     it('rejects unknown sender and logs email_dropped with NO body content', async () => {
       const { db, events, jobs } = createMockDb();
 
