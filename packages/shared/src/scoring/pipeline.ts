@@ -7,6 +7,7 @@ import { evaluateRuleFilters } from './filter-rules.js';
 import { evaluateSkipChecks } from './skip-checks.js';
 import { discoverContact, type ContactDiscoveryConfig } from './contact-finder.js';
 import { routeJob, type RoutableJob } from './router.js';
+import { TransientLlmError } from './llm-client.js';
 import type { JobContactSource, JobSourceKind } from '../schema.js';
 
 export interface ProcessPipelineOptions {
@@ -32,6 +33,7 @@ export interface PipelineStats {
   scored: number;
   routed: number;
   deferred_daily_cap: number;
+  deferred_rate_limit?: number | undefined;
 }
 
 export async function getScoredCountToday(db: D1LikeDatabase, datePrefix: string): Promise<number> {
@@ -324,17 +326,26 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
 
       llmCallsThisRun++;
 
-      const scoreRes = await scorer.scoreJob(
-        {
-          title: job.title,
-          company: job.company,
-          source_kind: job.source_kind,
-          location: job.location,
-          description: job.description,
-          salary_raw: job.salary_raw,
-        },
-        profile,
-      );
+      let scoreRes;
+      try {
+        scoreRes = await scorer.scoreJob(
+          {
+            title: job.title,
+            company: job.company,
+            source_kind: job.source_kind,
+            location: job.location,
+            description: job.description,
+            salary_raw: job.salary_raw,
+          },
+          profile,
+        );
+      } catch (err) {
+        if (err instanceof TransientLlmError) {
+          stats.deferred_rate_limit = (stats.deferred_rate_limit ?? 0) + 1;
+          break;
+        }
+        throw err;
+      }
 
       scoredToday++;
       // Record scoring event for daily cap tracking

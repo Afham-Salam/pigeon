@@ -5,7 +5,9 @@ import {
   routeJob,
   discoverContact,
   DefaultScorer,
+  GeminiClient,
   MockLLMClient,
+  TransientLlmError,
   processJobPipeline,
   type Profile,
   type RoutableJob,
@@ -1474,6 +1476,101 @@ describe('Phase 4: Rule Filters, Skip Checks, Scorer, and Router', () => {
       expect(stats.scored).toBe(1);
       expect(stats.routed).toBe(1);
       expect(jobs.get('job-match-after-noise')?.['status']).toBe('routed');
+    });
+
+    it('GeminiClient retries on 429/5xx and defers jobs on TransientLlmError instead of marking SCORER_FAILED', async () => {
+      let calls = 0;
+      const delays: number[] = [];
+      const mockFetch = vi.fn().mockImplementation(async () => {
+        calls++;
+        if (calls === 1) {
+          return new Response('Rate limited', {
+            status: 429,
+            headers: { 'Retry-After': '1' },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            candidates: [
+              {
+                content: {
+                  parts: [
+                    {
+                      text: JSON.stringify({
+                        score: 88,
+                        matched_skills: ['TypeScript'],
+                        missing_skills: [],
+                        red_flags: [],
+                        reasons: 'Strong fit after retry.',
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      });
+
+      const client = new GeminiClient(
+        'test-key',
+        'gemini-3.5-flash-lite',
+        mockFetch as unknown as typeof fetch,
+        {
+          delayFn: async (ms) => {
+            delays.push(ms);
+          },
+          maxRetries: 2,
+        },
+      );
+      const output = await client.generateText('prompt');
+      expect(calls).toBe(2);
+      expect(delays).toEqual([1000]);
+      expect(JSON.parse(output).score).toBe(88);
+
+      // Exhausted 429 throws TransientLlmError and pipeline leaves job in 'new'
+      const always429Fetch = vi
+        .fn()
+        .mockImplementation(async () => new Response('Too many requests', { status: 429 }));
+      const failingClient = new GeminiClient(
+        'test-key',
+        'gemini-3.5-flash-lite',
+        always429Fetch as unknown as typeof fetch,
+        {
+          delayFn: async () => {},
+          maxRetries: 1,
+        },
+      );
+      const { db, jobs } = createMockDb();
+      jobs.set('job-rate-limited', {
+        id: 'job-rate-limited',
+        source: 'remoteok',
+        source_kind: 'api',
+        title: 'Senior Systems Engineer',
+        company: 'Acme Corp',
+        company_normalized: 'acme',
+        location: 'Remote',
+        remote: 1,
+        salary_min: 160000,
+        salary_max: 190000,
+        description: 'TypeScript distributed systems.',
+        apply_url: 'https://acme.com/jobs/1',
+        status: 'new',
+        fetched_at: '2026-11-05T09:00:00Z',
+      });
+
+      const stats = await processJobPipeline({
+        db,
+        profile: mockProfile,
+        scorer: new DefaultScorer(failingClient),
+      });
+
+      expect(stats.deferred_rate_limit).toBe(1);
+      expect(stats.scored).toBe(0);
+      expect(jobs.get('job-rate-limited')?.['status']).toBe('new');
+      expect(jobs.get('job-rate-limited')?.['scorer_failed']).toBeUndefined();
+      await expect(failingClient.generateText('prompt')).rejects.toBeInstanceOf(TransientLlmError);
     });
   });
 });

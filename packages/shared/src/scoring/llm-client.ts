@@ -35,43 +35,101 @@ export class WorkersAiClient implements LLMClient {
   }
 }
 
+export class TransientLlmError extends Error {
+  public readonly status: number;
+  public readonly retryAfterMs: number | undefined;
+
+  constructor(message: string, status: number, retryAfterMs?: number) {
+    super(message);
+    this.name = 'TransientLlmError';
+    this.status = status;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+export interface GeminiClientOptions {
+  delayFn?: ((ms: number) => Promise<void>) | undefined;
+  maxRetries?: number | undefined;
+}
+
+function parseRetryAfterMs(headerVal: string | null, attempt: number): number {
+  const defaultBackoff = Math.min(5000, 500 * (attempt + 1));
+  if (!headerVal) return defaultBackoff;
+  const seconds = Number.parseInt(headerVal.trim(), 10);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(5000, seconds * 1000);
+  }
+  return defaultBackoff;
+}
+
 export class GeminiClient implements LLMClient {
   private readonly apiKey: string;
   private readonly model: string;
   private readonly fetchFn: typeof fetch;
+  private readonly delayFn: (ms: number) => Promise<void>;
+  private readonly maxRetries: number;
 
-  constructor(apiKey: string, model: string = 'gemini-2.0-flash', fetchFn: typeof fetch = fetch) {
+  constructor(
+    apiKey: string,
+    model: string = 'gemini-2.0-flash',
+    fetchFn: typeof fetch = fetch,
+    options?: GeminiClientOptions,
+  ) {
     this.apiKey = apiKey;
     this.model = model;
     this.fetchFn = (input, init) => fetchFn(input, init);
+    this.delayFn =
+      options?.delayFn ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
+    this.maxRetries = options?.maxRetries ?? 2;
   }
 
   async generateText(prompt: string): Promise<string> {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
-    const res = await this.fetchFn(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.1,
-          responseMimeType: 'application/json',
-        },
-      }),
+    const body = JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.1,
+        responseMimeType: 'application/json',
+      },
     });
 
-    if (!res.ok) {
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      const res = await this.fetchFn(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+
+      if (res.ok) {
+        const data = (await res.json()) as {
+          candidates?: Array<{
+            content?: { parts?: Array<{ text?: string }> };
+          }>;
+        };
+        return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      }
+
+      const isTransient = res.status === 429 || res.status >= 500;
+      if (isTransient) {
+        const waitMs = parseRetryAfterMs(res.headers.get('Retry-After'), attempt);
+        if (attempt < this.maxRetries) {
+          await res.body?.cancel?.();
+          await this.delayFn(waitMs);
+          continue;
+        }
+        const errText = await res.text();
+        throw new TransientLlmError(
+          `Gemini API error (${res.status}): ${errText}`,
+          res.status,
+          waitMs,
+        );
+      }
+
       const errText = await res.text();
       throw new Error(`Gemini API error (${res.status}): ${errText}`);
     }
 
-    const data = (await res.json()) as {
-      candidates?: Array<{
-        content?: { parts?: Array<{ text?: string }> };
-      }>;
-    };
-
-    return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    throw new TransientLlmError('Gemini API error: retries exhausted', 503);
   }
 }
 

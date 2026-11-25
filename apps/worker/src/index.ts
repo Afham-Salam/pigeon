@@ -4072,8 +4072,12 @@ export default {
               filterLimit: 100,
             });
 
-            // Re-enqueue next batch if new jobs remain and daily cap wasn't hit
-            if (pipelineStats.deferred_daily_cap === 0 && pipelineStats.processed > 0) {
+            // Re-enqueue next batch if new jobs remain and neither daily cap nor rate limit was hit
+            if (
+              pipelineStats.deferred_daily_cap === 0 &&
+              (pipelineStats.deferred_rate_limit ?? 0) === 0 &&
+              pipelineStats.processed > 0
+            ) {
               const moreNew = await env.DB.prepare(
                 `SELECT id FROM jobs WHERE status = 'new' LIMIT 1`,
               ).first<{ id: string }>();

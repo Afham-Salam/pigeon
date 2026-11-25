@@ -3,6 +3,7 @@ import type { LLMClient } from '../types.js';
 import type { Profile } from '../profile.js';
 import type { JobSourceKind } from '../schema.js';
 import { wrapUntrusted } from '../safety.js';
+import { TransientLlmError } from './llm-client.js';
 
 export const ScorerOutputSchema = z.object({
   score: z.number().min(0).max(100),
@@ -132,7 +133,10 @@ export class DefaultScorer implements Scorer {
         reasons: validated1.reasons,
         scorer_failed: false,
       };
-    } catch {
+    } catch (err) {
+      if (err instanceof TransientLlmError) {
+        throw err;
+      }
       // Retry once on invalid JSON or zod schema mismatch
       try {
         const retryPrompt = `${prompt}\n\nIMPORTANT: Your previous response was not valid JSON. You MUST output strictly a JSON object with keys: score, matched_skills, missing_skills, red_flags, reasons.`;
@@ -148,7 +152,10 @@ export class DefaultScorer implements Scorer {
           reasons: validated2.reasons,
           scorer_failed: false,
         };
-      } catch {
+      } catch (retryErr) {
+        if (retryErr instanceof TransientLlmError) {
+          throw retryErr;
+        }
         // Second failure sets scorer_failed
         return {
           score: 0,
