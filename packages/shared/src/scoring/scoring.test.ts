@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   evaluateRuleFilters,
   evaluateSkipChecks,
+  loadSkipCheckCache,
   routeJob,
   discoverContact,
   DefaultScorer,
@@ -151,6 +152,19 @@ function createMockDb(): {
             const res = Array.from(jobs.values())
               .filter((j) => j['status'] === 'scored')
               .slice(0, limit);
+            return { results: res as unknown as T[] };
+          }
+          if (query.includes('FROM do_not_contact')) {
+            const res = Array.from(dnc).map((value) => ({ value }));
+            return { results: res as unknown as T[] };
+          }
+          if (query.includes('FROM companies_contacted')) {
+            const res = Array.from(companiesContacted.entries()).map(
+              ([company_normalized, last_contacted_at]) => ({
+                company_normalized,
+                last_contacted_at,
+              }),
+            );
             return { results: res as unknown as T[] };
           }
           return { results: [] };
@@ -1638,6 +1652,40 @@ describe('Phase 4: Rule Filters, Skip Checks, Scorer, and Router', () => {
       expect(jobs.get('job-rate-limited')?.['status']).toBe('new');
       expect(jobs.get('job-rate-limited')?.['scorer_failed']).toBeUndefined();
       await expect(failingClient.generateText('prompt')).rejects.toBeInstanceOf(TransientLlmError);
+    });
+
+    it('loadSkipCheckCache evaluates DNC and recent contacts without per-job DB queries', async () => {
+      const { db, dnc, companiesContacted } = createMockDb();
+      dnc.add('blocked.io');
+      companiesContacted.set('recentcorp', new Date(Date.now() - 5 * 86400 * 1000).toISOString());
+
+      const cache = await loadSkipCheckCache(db);
+      expect(cache).toBeDefined();
+
+      const throwingDb: D1LikeDatabase = {
+        prepare() {
+          throw new Error('Should not query DB when SkipCheckCache is provided');
+        },
+        async batch() {
+          return [];
+        },
+      };
+
+      const dncRes = await evaluateSkipChecks(
+        { company: 'AnyCo', contact_email: 'hr@blocked.io' },
+        throwingDb,
+        Date.now(),
+        cache,
+      );
+      expect(dncRes).toEqual({ skipped: true, reason: 'DNC' });
+
+      const recentRes = await evaluateSkipChecks(
+        { company: 'RecentCorp Inc', company_normalized: 'recentcorp' },
+        throwingDb,
+        Date.now(),
+        cache,
+      );
+      expect(recentRes).toEqual({ skipped: true, reason: 'RECENT_CONTACT' });
     });
   });
 });

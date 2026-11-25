@@ -4,7 +4,7 @@ import type { Profile } from '../profile.js';
 import type { ContactFinder } from '../types.js';
 import type { Scorer } from './scorer.js';
 import { evaluateRuleFilters } from './filter-rules.js';
-import { evaluateSkipChecks } from './skip-checks.js';
+import { evaluateSkipChecks, loadSkipCheckCache } from './skip-checks.js';
 import { discoverContact, type ContactDiscoveryConfig } from './contact-finder.js';
 import { routeJob, type RoutableJob } from './router.js';
 import { TransientLlmError } from './llm-client.js';
@@ -261,6 +261,7 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
       .all<RawJobRow>();
 
     const newJobs = jobsRes.results || [];
+    const skipCache = newJobs.length > 0 ? await loadSkipCheckCache(db) : undefined;
 
     for (const job of newJobs) {
       // STEP 1: RULE FILTERS (cheap, run first)
@@ -299,6 +300,7 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
         },
         db,
         nowMs,
+        skipCache,
       );
 
       if (skipRes.skipped) {
