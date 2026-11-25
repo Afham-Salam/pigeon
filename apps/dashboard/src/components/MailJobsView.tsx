@@ -81,10 +81,63 @@ export function MailJobsView({ apiBase = '', onNavigateTab }: Props): React.JSX.
   // Expandable match details
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
-  // Gmail sync
+  // Gmail sync & requeue
   const [syncingGmail, setSyncingGmail] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [creatingAppJobId, setCreatingAppJobId] = useState<string | null>(null);
+  const [requeuingJobId, setRequeuingJobId] = useState<string | null>(null);
+  const [bulkRequeuing, setBulkRequeuing] = useState(false);
+
+  const handleRequeueJob = async (jobId: string) => {
+    try {
+      setRequeuingJobId(jobId);
+      const res = await apiFetch(`${apiBase}/api/jobs/${encodeURIComponent(jobId)}/requeue`, {
+        method: 'POST',
+      });
+      if (!res.ok) {
+        const errJson = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errJson.error || `Failed to re-queue job (${res.status})`);
+      }
+      setSyncFeedback('Job moved back to Pending (new) and queued for scoring.');
+      await loadJobs();
+      setTimeout(() => setSyncFeedback(null), 5000);
+    } catch (err) {
+      setSyncFeedback(`Re-queue failed: ${err instanceof Error ? err.message : String(err)}`);
+      setTimeout(() => setSyncFeedback(null), 5000);
+    } finally {
+      setRequeuingJobId(null);
+    }
+  };
+
+  const handleBulkRequeue = async (targetStatus: 'skipped' | 'filtered_out') => {
+    try {
+      setBulkRequeuing(true);
+      const payload: Record<string, unknown> = { status: targetStatus, limit: 100 };
+      if (sourceKind !== 'all') {
+        payload.source_kind = sourceKind;
+      }
+      const res = await apiFetch(`${apiBase}/api/jobs/requeue-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        const errJson = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errJson.error || `Bulk re-queue failed (${res.status})`);
+      }
+      const json = (await res.json()) as { requeued?: number };
+      setSyncFeedback(
+        `Re-queued ${json.requeued ?? 0} ${targetStatus.replace('_', ' ')} job(s) for re-scoring.`,
+      );
+      await loadJobs();
+      setTimeout(() => setSyncFeedback(null), 6000);
+    } catch (err) {
+      setSyncFeedback(`Bulk re-queue failed: ${err instanceof Error ? err.message : String(err)}`);
+      setTimeout(() => setSyncFeedback(null), 6000);
+    } finally {
+      setBulkRequeuing(false);
+    }
+  };
 
   const handleViewInManualApply = async (jobId: string) => {
     try {
@@ -208,6 +261,19 @@ export function MailJobsView({ apiBase = '', onNavigateTab }: Props): React.JSX.
         </div>
 
         <div className="flex flex-wrap items-center gap-2 self-start md:self-auto shrink-0">
+          {(statusFilter === 'skipped' || statusFilter === 'filtered_out') && (
+            <Button
+              variant="secondary"
+              size="sm"
+              icon={RefreshCw}
+              loading={bulkRequeuing}
+              onClick={() => void handleBulkRequeue(statusFilter)}
+            >
+              {bulkRequeuing
+                ? 'Re-queuing...'
+                : `Re-queue ${statusFilter === 'skipped' ? 'Skipped' : 'Filtered'} Jobs`}
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -580,6 +646,17 @@ export function MailJobsView({ apiBase = '', onNavigateTab }: Props): React.JSX.
                   </div>
 
                   <div className="flex items-center gap-2">
+                    {(job.status === 'skipped' || job.status === 'filtered_out') && (
+                      <Button
+                        variant="secondary"
+                        size="xs"
+                        icon={RefreshCw}
+                        loading={requeuingJobId === job.id}
+                        onClick={() => void handleRequeueJob(job.id)}
+                      >
+                        Re-queue
+                      </Button>
+                    )}
                     {job.status === 'routed' && onNavigateTab && (
                       <Button
                         variant="secondary"

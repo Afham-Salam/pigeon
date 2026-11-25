@@ -2250,6 +2250,96 @@ app.get('/api/jobs', async (c) => {
   });
 });
 
+const RequeueBulkSchema = z.object({
+  status: z.enum(['skipped', 'filtered_out']).default('skipped'),
+  filter_reason: z.string().max(100).optional(),
+  source_kind: z.enum(['alert_email', 'ats', 'api']).optional(),
+  limit: z.number().int().min(1).max(200).default(100),
+});
+
+// POST /api/jobs/:id/requeue: Moves a filtered_out or skipped job back to 'new' for re-scoring
+app.post('/api/jobs/:id/requeue', async (c) => {
+  const jobId = c.req.param('id');
+  const job = await c.env.DB.prepare(`SELECT id, status FROM jobs WHERE id = ?`)
+    .bind(jobId)
+    .first<{ id: string; status: string }>();
+
+  if (!job) {
+    return c.json({ error: 'Job not found' }, 404);
+  }
+  if (job.status !== 'filtered_out' && job.status !== 'skipped') {
+    return c.json(
+      { error: `Only filtered_out or skipped jobs can be re-queued (current: ${job.status})` },
+      400,
+    );
+  }
+
+  await transition(c.env.DB, 'job', jobId, 'new', 'MANUAL_REQUEUE');
+  const nowIso = new Date().toISOString();
+  await c.env.DB.prepare(
+    `UPDATE jobs
+     SET filter_reason = NULL, match_score = NULL, match_reasons = NULL, red_flags = '[]', scorer_failed = 0, updated_at = ?
+     WHERE id = ?`,
+  )
+    .bind(nowIso, jobId)
+    .run();
+
+  try {
+    await c.env.JOBS_QUEUE.send({ action: 'score_and_route' });
+  } catch {
+    // Non-blocking
+  }
+
+  return c.json({ ok: true, id: jobId, status: 'new' });
+});
+
+// POST /api/jobs/requeue-bulk: Rescues matching skipped or filtered_out jobs back to 'new'
+app.post('/api/jobs/requeue-bulk', async (c) => {
+  const rawBody = await c.req.json().catch(() => ({}));
+  const parsed = RequeueBulkSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message || 'Invalid requeue payload' }, 400);
+  }
+
+  const { status, filter_reason, source_kind, limit } = parsed.data;
+  const rowsRes = await c.env.DB.prepare(
+    `SELECT id FROM jobs
+     WHERE status = ?
+       AND (? IS NULL OR filter_reason = ?)
+       AND (? IS NULL OR source_kind = ?)
+     ORDER BY updated_at DESC
+     LIMIT ?`,
+  )
+    .bind(status, filter_reason ?? null, filter_reason ?? null, source_kind ?? null, source_kind ?? null, limit)
+    .all<{ id: string }>();
+
+  const rows = rowsRes.results || [];
+  const nowIso = new Date().toISOString();
+  let requeued = 0;
+
+  for (const r of rows) {
+    await transition(c.env.DB, 'job', r.id, 'new', 'MANUAL_BULK_REQUEUE');
+    await c.env.DB.prepare(
+      `UPDATE jobs
+       SET filter_reason = NULL, match_score = NULL, match_reasons = NULL, red_flags = '[]', scorer_failed = 0, updated_at = ?
+       WHERE id = ?`,
+    )
+      .bind(nowIso, r.id)
+      .run();
+    requeued++;
+  }
+
+  if (requeued > 0) {
+    try {
+      await c.env.JOBS_QUEUE.send({ action: 'score_and_route' });
+    } catch {
+      // Non-blocking
+    }
+  }
+
+  return c.json({ ok: true, requeued });
+});
+
 // 7. GET /api/sources: Source circuit and parser health
 app.get('/api/sources', async (c) => {
   interface SourceStateDbRow {
@@ -2408,6 +2498,70 @@ app.post('/api/sources/reset', async (c) => {
     ).run();
   }
   return c.json({ ok: true, message: 'Circuit breakers reset successfully' });
+});
+
+const ATS_DEFAULT_SLUGS: Record<string, string[]> = {
+  greenhouse: ['careem'],
+  lever: ['meesho'],
+  ashby: ['linear'],
+  smartrecruiters: ['visa'],
+  workable: [],
+  breezy: [],
+  bamboohr: [],
+  recruitee: [],
+};
+
+const AtsSlugsBodySchema = z.object({
+  source: z.enum([
+    'greenhouse',
+    'lever',
+    'ashby',
+    'smartrecruiters',
+    'workable',
+    'breezy',
+    'bamboohr',
+    'recruitee',
+  ]),
+  slugs: z.array(z.string().trim().min(1).max(100)).max(100),
+});
+
+// GET /api/sources/slugs: Returns configured ATS company slugs per source
+app.get('/api/sources/slugs', async (c) => {
+  const result: Record<string, string[]> = {};
+  for (const [source, defaults] of Object.entries(ATS_DEFAULT_SLUGS)) {
+    const raw = await c.env.CONFIG.get(`sources:${source}:slugs`);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          result[source] = parsed.map(String).filter(Boolean);
+          continue;
+        }
+      } catch {
+        const list = raw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        result[source] = list;
+        continue;
+      }
+    }
+    result[source] = defaults;
+  }
+  return c.json({ ok: true, slugsBySource: result });
+});
+
+// PUT /api/sources/slugs: Updates configured ATS company slugs for a source
+app.put('/api/sources/slugs', async (c) => {
+  const rawBody = await c.req.json().catch(() => ({}));
+  const parsed = AtsSlugsBodySchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message || 'Invalid slugs payload' }, 400);
+  }
+  const { source, slugs } = parsed.data;
+  const deduped = Array.from(new Set(slugs.map((s) => s.trim()).filter(Boolean)));
+  await c.env.CONFIG.put(`sources:${source}:slugs`, JSON.stringify(deduped));
+  return c.json({ ok: true, source, slugs: deduped });
 });
 
 // POST /api/sources/sync: Triggers immediate ingestion across all enabled sources

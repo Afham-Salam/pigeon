@@ -352,4 +352,75 @@ describe('Worker Scoring & Routing Pipeline Integration', () => {
       true,
     );
   });
+
+  it('re-queues skipped/filtered jobs and updates ATS slugs via API', async () => {
+    const nowIso = new Date().toISOString();
+    await workerEnv.DB.prepare(
+      `INSERT OR REPLACE INTO jobs (
+         id, dedupe_key, source, source_kind, source_job_id,
+         title, company, company_normalized, location, remote,
+         description, apply_url, status, filter_reason, match_score,
+         fetched_at, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+      .bind(
+        'job-requeue-1',
+        'dedupe-requeue-1',
+        'indeed',
+        'alert_email',
+        'req-1',
+        'Flutter Engineer',
+        'Unknown',
+        'unknown',
+        'Remote',
+        1,
+        'Flutter Engineer at Unknown',
+        'https://indeed.com/viewjob?jk=req1',
+        'skipped',
+        'LOW_SCORE',
+        55,
+        nowIso,
+        nowIso,
+      )
+      .run();
+
+    const requeueRes = await app.request(
+      '/api/jobs/job-requeue-1/requeue',
+      { method: 'POST', headers: { Origin: 'http://localhost:5173' } },
+      workerEnv,
+    );
+    expect(requeueRes.status).toBe(200);
+    const requeueJson = (await requeueRes.json()) as { ok: boolean; status: string };
+    expect(requeueJson.ok).toBe(true);
+    expect(requeueJson.status).toBe('new');
+
+    const rowAfter = await workerEnv.DB.prepare(
+      `SELECT status, filter_reason, match_score FROM jobs WHERE id = 'job-requeue-1'`,
+    ).first<{ status: string; filter_reason: string | null; match_score: number | null }>();
+    expect(rowAfter?.status).toBe('new');
+    expect(rowAfter?.filter_reason).toBeNull();
+    expect(rowAfter?.match_score).toBeNull();
+
+    // Update and read ATS slugs
+    const putSlugsRes = await app.request(
+      '/api/sources/slugs',
+      {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'http://localhost:5173',
+        },
+        body: JSON.stringify({ source: 'greenhouse', slugs: ['careem', 'stripe'] }),
+      },
+      workerEnv,
+    );
+    expect(putSlugsRes.status).toBe(200);
+
+    const getSlugsRes = await app.request('/api/sources/slugs', {}, workerEnv);
+    expect(getSlugsRes.status).toBe(200);
+    const slugsJson = (await getSlugsRes.json()) as {
+      slugsBySource: Record<string, string[]>;
+    };
+    expect(slugsJson.slugsBySource['greenhouse']).toEqual(['careem', 'stripe']);
+  });
 });

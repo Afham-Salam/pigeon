@@ -370,4 +370,13 @@ describe('SettingsView & SetupView Sub-Navigation & Integrations', () => {
     expect(input.type).toBe('password');
     expect(input.getAttribute('autocomplete')).toBe('off');
   });
+
+  it('renders Excluded Title Keywords input in Profile tab', async () => {
+    await act(async () => {
+      root?.render(<SettingsView initialSubTab="profile" />);
+    });
+
+    const excludeInput = container?.querySelector('#title-exclude-input') as HTMLInputElement | null;
+    expect(excludeInput).not.toBeNull();
+  });
 });

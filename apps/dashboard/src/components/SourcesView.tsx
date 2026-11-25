@@ -37,6 +37,10 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const [resetting, setResetting] = useState(false);
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+  const [slugsBySource, setSlugsBySource] = useState<Record<string, string[]>>({});
+  const [editingSlugSource, setEditingSlugSource] = useState<string | null>(null);
+  const [slugInputText, setSlugInputText] = useState('');
+  const [savingSlugs, setSavingSlugs] = useState(false);
 
   const openCircuitsCount = useMemo(
     () => sources.filter((s) => s.circuit_state === 'open').length,
@@ -133,6 +137,20 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
       const data = (await res.json()) as { ok: boolean; sources: SourceStatusItem[] };
       setSources(data.sources || []);
       setLastRefreshed(new Date());
+
+      try {
+        const slugsRes = await apiFetch(`${apiBase}/api/sources/slugs`);
+        if (slugsRes.ok) {
+          const slugsData = (await slugsRes.json()) as {
+            slugsBySource?: Record<string, string[]>;
+          };
+          if (slugsData.slugsBySource) {
+            setSlugsBySource(slugsData.slugsBySource);
+          }
+        }
+      } catch {
+        // Non-blocking slug fetch
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -449,6 +467,84 @@ export function SourcesView({ apiBase = '' }: Props): React.JSX.Element {
                       <span className="text-state-danger-fg text-[11px] font-mono break-all line-clamp-2">
                         {src.last_error}
                       </span>
+                    </div>
+                  )}
+
+                  {src.kind === 'ats' && (
+                    <div className="pt-2 border-t border-border-subtle space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-fg-muted text-[11px]">
+                          Slugs ({(slugsBySource[src.name] || []).length}):{' '}
+                          <span className="font-mono text-fg">
+                            {(slugsBySource[src.name] || []).join(', ') || 'None'}
+                          </span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (editingSlugSource === src.name) {
+                              setEditingSlugSource(null);
+                            } else {
+                              setEditingSlugSource(src.name);
+                              setSlugInputText((slugsBySource[src.name] || []).join(', '));
+                            }
+                          }}
+                          className="text-[11px] font-medium text-accent hover:underline cursor-pointer shrink-0"
+                        >
+                          {editingSlugSource === src.name ? 'Cancel' : 'Edit Slugs'}
+                        </button>
+                      </div>
+
+                      {editingSlugSource === src.name && (
+                        <div className="space-y-1.5">
+                          <input
+                            type="text"
+                            aria-label={`Company slugs for ${src.name}`}
+                            value={slugInputText}
+                            onChange={(e) => setSlugInputText(e.target.value)}
+                            placeholder="e.g. stripe, linear, careem"
+                            className="w-full text-[12px] font-mono px-2.5 py-1 rounded-[4px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                          />
+                          <div className="flex justify-end">
+                            <Button
+                              variant="primary"
+                              size="xs"
+                              loading={savingSlugs}
+                              onClick={async () => {
+                                try {
+                                  setSavingSlugs(true);
+                                  const slugs = slugInputText
+                                    .split(',')
+                                    .map((s) => s.trim())
+                                    .filter(Boolean);
+                                  const res = await apiFetch(`${apiBase}/api/sources/slugs`, {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ source: src.name, slugs }),
+                                  });
+                                  if (!res.ok) {
+                                    throw new Error(`Failed to save slugs (${res.status})`);
+                                  }
+                                  const json = (await res.json()) as { slugs: string[] };
+                                  setSlugsBySource((prev) => ({
+                                    ...prev,
+                                    [src.name]: json.slugs,
+                                  }));
+                                  setEditingSlugSource(null);
+                                  setSyncFeedback(`Saved ${json.slugs.length} slug(s) for ${src.name}.`);
+                                  setTimeout(() => setSyncFeedback(null), 4000);
+                                } catch (err) {
+                                  setError(err instanceof Error ? err.message : String(err));
+                                } finally {
+                                  setSavingSlugs(false);
+                                }
+                              }}
+                            >
+                              Save Slugs
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

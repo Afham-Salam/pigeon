@@ -89,6 +89,7 @@ export function SettingsView({
   const [minScore, setMinScore] = useState(0);
   const [autoApproveScore, setAutoApproveScore] = useState(85);
   const [titleFiltersText, setTitleFiltersText] = useState('');
+  const [titleExcludeText, setTitleExcludeText] = useState('');
   const [companyBlacklistText, setCompanyBlacklistText] = useState('');
   const [locationsText, setLocationsText] = useState('');
   const [workplaceType, setWorkplaceType] = useState<
@@ -207,6 +208,7 @@ export function SettingsView({
         setMinScore(data.profile.filters?.min_score ?? 0);
         setAutoApproveScore(data.profile.send_settings?.auto_approve_above_score ?? 85);
         setTitleFiltersText((data.profile.filters?.titles || []).join(', '));
+        setTitleExcludeText((data.profile.filters?.title_exclude || []).join(', '));
         setCompanyBlacklistText((data.profile.filters?.company_blacklist || []).join(', '));
         const locs =
           data.profile.filters?.locations?.length
@@ -309,6 +311,10 @@ export function SettingsView({
         .split(',')
         .map((t) => t.trim())
         .filter(Boolean);
+      const titleExclude = titleExcludeText
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
       const companyBlacklist = companyBlacklistText
         .split(',')
         .map((c) => c.trim())
@@ -351,7 +357,9 @@ export function SettingsView({
           auto_approve_above_score: Number(autoApproveScore),
         },
         filters: {
+          ...(profile?.filters || {}),
           titles,
+          title_exclude: titleExclude,
           locations,
           workplace_type: workplaceType,
           remote: workplaceType === 'remote',
@@ -601,6 +609,23 @@ export function SettingsView({
                 value={titleFiltersText}
                 onChange={(e) => setTitleFiltersText(e.target.value)}
                 placeholder="Software Engineer, Backend Developer"
+                className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="title-exclude-input"
+                className="block text-[12px] font-medium uppercase tracking-wider text-fg-muted mb-1.5"
+              >
+                Excluded Title Keywords (comma-separated)
+              </label>
+              <input
+                id="title-exclude-input"
+                type="text"
+                value={titleExcludeText}
+                onChange={(e) => setTitleExcludeText(e.target.value)}
+                placeholder="telecom, network operations, qa, manager"
                 className="w-full text-[13px] px-3 py-1.5 rounded-[6px] border border-border bg-surface text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
               />
             </div>
