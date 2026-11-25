@@ -8,7 +8,37 @@ export interface FilterableJob {
   remote?: boolean | null | undefined;
   salary_min?: number | null | undefined;
   salary_max?: number | null | undefined;
+  currency?: string | null | undefined;
   description?: string | null | undefined;
+}
+
+const APPROX_USD_RATES: Record<string, number> = {
+  USD: 1,
+  EUR: 1.08,
+  GBP: 1.27,
+  CAD: 0.72,
+  AUD: 0.65,
+  SGD: 0.74,
+  CHF: 1.13,
+  INR: 0.012,
+  JPY: 0.0066,
+};
+
+const HYBRID_WORKPLACE_REGEX =
+  /\bhybrid\s+(?:work|role|position|schedule|model|environment|arrangement|setup|team|office)\b|\b(?:work|working)\s+hybrid\b/i;
+
+export function convertSalaryCurrency(
+  amount: number,
+  fromCurrency?: string | null,
+  toCurrency?: string | null,
+): number {
+  const from = (fromCurrency || 'USD').toUpperCase().trim();
+  const to = (toCurrency || 'USD').toUpperCase().trim();
+  if (from === to) return amount;
+  const fromRate = APPROX_USD_RATES[from];
+  const toRate = APPROX_USD_RATES[to];
+  if (!fromRate || !toRate) return amount;
+  return (amount * fromRate) / toRate;
 }
 
 export interface RuleFilterResult {
@@ -109,7 +139,7 @@ export function evaluateRuleFilters(job: FilterableJob, profile: Profile): RuleF
   const jobIsHybrid =
     titleLower.includes('hybrid') ||
     (job.location || '').toLowerCase().includes('hybrid') ||
-    (job.description || '').toLowerCase().includes('hybrid');
+    HYBRID_WORKPLACE_REGEX.test(job.description || '');
 
   const workplacePref =
     filters.workplace_type ||
@@ -154,7 +184,12 @@ export function evaluateRuleFilters(job: FilterableJob, profile: Profile): RuleF
   const hasSalary = job.salary_max != null || job.salary_min != null;
   if (filters.min_salary != null && filters.min_salary > 0) {
     if (hasSalary) {
-      const effectiveSalary = job.salary_max ?? job.salary_min ?? 0;
+      const rawEffective = job.salary_max ?? job.salary_min ?? 0;
+      const effectiveSalary = convertSalaryCurrency(
+        rawEffective,
+        job.currency,
+        filters.salary_currency,
+      );
       if (effectiveSalary < filters.min_salary) {
         return { passed: false, reason: 'SALARY_LOW' };
       }

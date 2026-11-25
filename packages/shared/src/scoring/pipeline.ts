@@ -273,6 +273,7 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
           remote: Boolean(job.remote),
           salary_min: job.salary_min,
           salary_max: job.salary_max,
+          currency: job.currency,
           description: job.description,
         },
         profile,

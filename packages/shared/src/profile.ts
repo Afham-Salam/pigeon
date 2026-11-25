@@ -47,6 +47,7 @@ export const FiltersSchema = z
     remote: z.boolean().optional(),
     workplace_type: WorkplaceTypeSchema.optional(),
     min_salary: z.number().nullable().optional(),
+    salary_currency: z.string().max(10).optional(),
     experience_range: z
       .object({
         min: z.number().min(0).optional(),

@@ -439,6 +439,73 @@ describe('Phase 4: Rule Filters, Skip Checks, Scorer, and Router', () => {
       expect(res.reason).toBe('SALARY_REQUIRED');
     });
 
+    it('normalizes job salary currency against filters.min_salary', () => {
+      // 1,500,000 INR (~$18k USD) should fail a $140k USD min_salary threshold
+      const inrRes = evaluateRuleFilters(
+        {
+          title: 'Senior Systems Engineer',
+          company: 'Acme Corp',
+          remote: true,
+          salary_min: 1500000,
+          salary_max: 1500000,
+          currency: 'INR',
+        },
+        mockProfile,
+      );
+      expect(inrRes.passed).toBe(false);
+      expect(inrRes.reason).toBe('SALARY_LOW');
+
+      // 115,000 GBP (~$146k USD) should pass a $140k USD min_salary threshold
+      const gbpRes = evaluateRuleFilters(
+        {
+          title: 'Senior Systems Engineer',
+          company: 'Acme Corp',
+          remote: true,
+          salary_min: 105000,
+          salary_max: 115000,
+          currency: 'GBP',
+        },
+        mockProfile,
+      );
+      expect(gbpRes.passed).toBe(true);
+    });
+
+    it('does not treat incidental "hybrid cloud" in description as hybrid workplace', () => {
+      const hybridProfile: Profile = {
+        ...mockProfile,
+        filters: {
+          ...mockProfile.filters,
+          workplace_type: 'hybrid',
+          locations: ['San Francisco'],
+        },
+      };
+
+      const incidentalRes = evaluateRuleFilters(
+        {
+          title: 'Senior Systems Engineer',
+          company: 'Acme Corp',
+          location: 'San Francisco, CA',
+          remote: false,
+          description: 'Build hybrid cloud infrastructure on-site in San Francisco.',
+        },
+        hybridProfile,
+      );
+      expect(incidentalRes.passed).toBe(false);
+      expect(incidentalRes.reason).toBe('LOCATION_MISMATCH');
+
+      const explicitRes = evaluateRuleFilters(
+        {
+          title: 'Senior Systems Engineer',
+          company: 'Acme Corp',
+          location: 'San Francisco, CA',
+          remote: false,
+          description: 'We offer a hybrid work model with 3 days in office.',
+        },
+        hybridProfile,
+      );
+      expect(explicitRes.passed).toBe(true);
+    });
+
     it('rejects on experience requirement too high (EXPERIENCE_TOO_HIGH)', () => {
       const res = evaluateRuleFilters(
         {
