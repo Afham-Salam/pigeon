@@ -32,6 +32,8 @@ import {
   FOUNDIT_EML_FIXTURE,
   WHATJOBS_EML_FIXTURE,
   BEBEE_EML_FIXTURE,
+  AMBITIONBOX_EML_FIXTURE,
+  CUTSHORT_EML_FIXTURE,
 } from './fixtures.js';
 
 // In-memory mock SQLite/D1 database for shared unit tests
@@ -257,6 +259,20 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       expect(cleanTrackingUrl(bebeeUrl)).toBe(
         'https://bebee.com/job/flutter-engineer-998877?id=998877',
       );
+
+      // AmbitionBox: keeps jobid / id
+      const ambitionBoxUrl =
+        'https://www.ambitionbox.com/jobs/flutter-developer-jobs-in-bengaluru-jd-90123?jobId=90123&utm_source=email&extra=drop';
+      expect(cleanTrackingUrl(ambitionBoxUrl)).toBe(
+        'https://www.ambitionbox.com/jobs/flutter-developer-jobs-in-bengaluru-jd-90123?jobId=90123',
+      );
+
+      // Cutshort: keeps jobid / id
+      const cutshortUrl =
+        'https://cutshort.io/job/senior-flutter-engineer-cred-cs8877?id=cs8877&utm_source=digest&extra=drop';
+      expect(cleanTrackingUrl(cutshortUrl)).toBe(
+        'https://cutshort.io/job/senior-flutter-engineer-cred-cs8877?id=cs8877',
+      );
     });
 
     it('cleans tracking hash/fragment', () => {
@@ -281,6 +297,8 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       expect(isAllowedSender('notifications@in.whatjobs.com')).toBe(true);
       expect(isAllowedSender('jobs@bebee.com')).toBe(true);
       expect(isAllowedSender('alerts@us.bebee.com')).toBe(true);
+      expect(isAllowedSender('jobalerts@ambitionbox.com')).toBe(true);
+      expect(isAllowedSender('alerts@cutshort.io')).toBe(true);
     });
 
     it('rejects unknown sender domains', () => {
@@ -561,6 +579,58 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       expect(jobs[1]?.company).toBe('Apex Apps India');
       expect(jobs[1]?.location).toBe('Bengaluru');
       expect(jobs[1]?.apply_url).toBe('https://bebee.com/in/jobs/lead-dart-developer-665544');
+    });
+
+    it('AmbitionBox parser extracts single-line and multi-line cards cleanly', async () => {
+      const email = await new PostalMime().parse(AMBITIONBOX_EML_FIXTURE);
+      const portal = detectPortal(email.from?.address ?? '');
+      expect(portal).toBe('ambitionbox');
+
+      const parser = getParser(portal);
+      const jobs = parser.parse(email.html ?? '');
+
+      expect(jobs).toHaveLength(2);
+      expect(jobs[0]).toMatchObject({
+        title: 'Flutter Developer',
+        company: 'Razorpay Software',
+        location: 'Bengaluru',
+        salary_raw: '18 - 28 LPA',
+        apply_url:
+          'https://www.ambitionbox.com/jobs/flutter-developer-jobs-in-bengaluru-jd-90123?jobId=90123',
+        description: 'Flutter Developer at Razorpay Software - Bengaluru',
+      });
+      expect(jobs[1]).toMatchObject({
+        title: 'Senior Mobile Engineer',
+        company: 'PhonePe',
+        location: 'Pune',
+        salary_raw: '25 - 35 LPA',
+        apply_url: 'https://www.ambitionbox.com/jobs/mobile-engineer-jobs-in-pune-90124',
+      });
+    });
+
+    it('Cutshort parser extracts jobs from class-based and plain-cell cards', async () => {
+      const email = await new PostalMime().parse(CUTSHORT_EML_FIXTURE);
+      const portal = detectPortal(email.from?.address ?? '');
+      expect(portal).toBe('cutshort');
+
+      const parser = getParser(portal);
+      const jobs = parser.parse(email.html ?? '');
+
+      expect(jobs).toHaveLength(2);
+      expect(jobs[0]).toMatchObject({
+        title: 'Senior Flutter Engineer',
+        company: 'CRED',
+        location: 'Bengaluru',
+        salary_raw: '24 - 40 LPA',
+        apply_url: 'https://cutshort.io/job/senior-flutter-engineer-cred-cs8877?id=cs8877',
+        description: 'Senior Flutter Engineer at CRED - Bengaluru',
+      });
+      expect(jobs[1]).toMatchObject({
+        title: 'Mobile App Developer (Flutter)',
+        company: 'Groww',
+        location: 'Remote',
+        apply_url: 'https://cutshort.io/job/mobile-app-developer-groww-cs8878',
+      });
     });
 
     it('beBee parser extracts jobs from card layouts with Arabic action buttons and notification tracking links', () => {

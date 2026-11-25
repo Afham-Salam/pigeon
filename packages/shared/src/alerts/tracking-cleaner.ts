@@ -11,6 +11,8 @@ export type PortalUrlType =
   | 'foundit'
   | 'whatjobs'
   | 'bebee'
+  | 'ambitionbox'
+  | 'cutshort'
   | 'unknown';
 
 const PORTAL_PARAM_ALLOWLIST: Record<Exclude<PortalUrlType, 'unknown'>, Set<string>> = {
@@ -26,6 +28,8 @@ const PORTAL_PARAM_ALLOWLIST: Record<Exclude<PortalUrlType, 'unknown'>, Set<stri
   foundit: new Set(),
   whatjobs: new Set(['jobid', 'id']),
   bebee: new Set(['id']),
+  ambitionbox: new Set(['jobid', 'id']),
+  cutshort: new Set(['jobid', 'id']),
 };
 
 export function detectPortalFromUrl(url: URL): PortalUrlType {
@@ -42,6 +46,8 @@ export function detectPortalFromUrl(url: URL): PortalUrlType {
   if (host.includes('foundit.') || host.includes('monsterindia.com')) return 'foundit';
   if (host.includes('whatjobs.')) return 'whatjobs';
   if (host.includes('bebee.')) return 'bebee';
+  if (host.includes('ambitionbox.com')) return 'ambitionbox';
+  if (host.includes('cutshort.io')) return 'cutshort';
   return 'unknown';
 }
 

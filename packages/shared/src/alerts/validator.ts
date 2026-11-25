@@ -22,6 +22,8 @@ const ALLOWED_SENDER_DOMAINS = [
   'whatjobs.ca',
   'whatjobs.in',
   'bebee.com',
+  'ambitionbox.com',
+  'cutshort.io',
 ];
 
 /**

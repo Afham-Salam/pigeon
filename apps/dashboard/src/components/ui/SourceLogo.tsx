@@ -21,6 +21,8 @@ const BRAND_NAMES: Record<string, string> = {
   foundit: 'Foundit',
   whatjobs: 'WhatJobs',
   bebee: 'beBee',
+  ambitionbox: 'AmbitionBox',
+  cutshort: 'Cutshort',
   greenhouse: 'Greenhouse',
   lever: 'Lever',
   ashby: 'Ashby',

@@ -2403,6 +2403,8 @@ app.get('/api/sources', async (c) => {
     { name: 'foundit', kind: 'alert_email' },
     { name: 'whatjobs', kind: 'alert_email' },
     { name: 'bebee', kind: 'alert_email' },
+    { name: 'ambitionbox', kind: 'alert_email' },
+    { name: 'cutshort', kind: 'alert_email' },
     // Public ATS JSON endpoints
     { name: 'greenhouse', kind: 'ats' },
     { name: 'lever', kind: 'ats' },

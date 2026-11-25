@@ -13,6 +13,8 @@ export type PortalType =
   | 'foundit'
   | 'whatjobs'
   | 'bebee'
+  | 'ambitionbox'
+  | 'cutshort'
   | 'fallback';
 
 export const ParsedAlertJobSchema = z.object({

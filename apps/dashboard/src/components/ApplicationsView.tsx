@@ -220,6 +220,8 @@ export function ApplicationsView({ apiBase = '' }: Props): React.JSX.Element {
               <option value="foundit">Foundit</option>
               <option value="whatjobs">WhatJobs</option>
               <option value="bebee">beBee</option>
+              <option value="ambitionbox">AmbitionBox</option>
+              <option value="cutshort">Cutshort</option>
             </optgroup>
             <optgroup label="ATS Endpoints">
               <option value="greenhouse">Greenhouse</option>

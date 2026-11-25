@@ -403,6 +403,8 @@ export function MailJobsView({ apiBase = '', onNavigateTab }: Props): React.JSX.
                 <option value="glassdoor">Glassdoor</option>
                 <option value="instahyre">Instahyre</option>
                 <option value="foundit">Foundit</option>
+                <option value="ambitionbox">AmbitionBox</option>
+                <option value="cutshort">Cutshort</option>
               </optgroup>
               <optgroup label="Direct ATS & APIs">
                 <option value="greenhouse">Greenhouse</option>

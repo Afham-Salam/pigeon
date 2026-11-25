@@ -11,6 +11,8 @@ import { instahyreParser } from './instahyre.js';
 import { founditParser } from './foundit.js';
 import { whatjobsParser } from './whatjobs.js';
 import { bebeeParser } from './bebee.js';
+import { ambitionboxParser } from './ambitionbox.js';
+import { cutshortParser } from './cutshort.js';
 import { fallbackParser } from './fallback.js';
 
 export {
@@ -26,6 +28,8 @@ export {
   founditParser,
   whatjobsParser,
   bebeeParser,
+  ambitionboxParser,
+  cutshortParser,
   fallbackParser,
 };
 
@@ -42,6 +46,8 @@ export const PORTAL_PARSERS: PortalParser[] = [
   founditParser,
   whatjobsParser,
   bebeeParser,
+  ambitionboxParser,
+  cutshortParser,
 ];
 
 export function detectPortal(fromAddress: string): PortalType {
@@ -80,6 +86,10 @@ export function getParser(portal: PortalType): PortalParser {
       return whatjobsParser;
     case 'bebee':
       return bebeeParser;
+    case 'ambitionbox':
+      return ambitionboxParser;
+    case 'cutshort':
+      return cutshortParser;
     case 'fallback':
     default:
       return fallbackParser;

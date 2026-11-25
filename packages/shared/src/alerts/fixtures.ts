@@ -356,3 +356,59 @@ Content-Type: text/html; charset=UTF-8
 </body>
 </html>
 `;
+
+export const AMBITIONBOX_EML_FIXTURE = `From: "AmbitionBox Job Alerts" <jobalerts@ambitionbox.com>
+To: "Alex Mercer" <alex.mercer@example.com>
+Subject: Top Flutter Developer jobs matching your profile
+Date: Tue, 04 Nov 2026 17:15:00 +0000
+Message-ID: <alert-ambitionbox-010@ambitionbox.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+<!DOCTYPE html>
+<html>
+<body>
+  <div class="job-card">
+    <a href="https://www.ambitionbox.com/jobs/flutter-developer-jobs-in-bengaluru-jd-90123?jobId=90123&amp;utm_source=email">Flutter Developer</a>
+    <div class="company-name">Razorpay Software</div>
+    <div class="location">Bengaluru</div>
+    <div class="salary">18 - 28 LPA</div>
+  </div>
+  <div class="job-card">
+    <a href="https://www.ambitionbox.com/jobs/mobile-engineer-jobs-in-pune-90124?utm_campaign=digest">
+      <div>Senior Mobile Engineer</div>
+      <div>PhonePe 4.2 ★</div>
+      <div>Pune</div>
+      <div>25 - 35 LPA</div>
+    </a>
+  </div>
+</body>
+</html>
+`;
+
+export const CUTSHORT_EML_FIXTURE = `From: "Cutshort Opportunities" <alerts@cutshort.io>
+To: "Alex Mercer" <alex.mercer@example.com>
+Subject: 2 new matches on Cutshort: Flutter Engineer
+Date: Tue, 04 Nov 2026 17:30:00 +0000
+Message-ID: <alert-cutshort-011@cutshort.io>
+MIME-Version: 1.0
+Content-Type: text/html; charset=UTF-8
+
+<!DOCTYPE html>
+<html>
+<body>
+  <div class="job-card">
+    <a href="https://cutshort.io/job/senior-flutter-engineer-cred-cs8877?id=cs8877&amp;utm_source=digest">Senior Flutter Engineer</a>
+    <div class="company-name">CRED</div>
+    <div class="location">Bengaluru</div>
+    <div class="salary">24 - 40 LPA</div>
+  </div>
+  <div class="job-card">
+    <a href="https://cutshort.io/job/mobile-app-developer-groww-cs8878?utm_medium=email">Mobile App Developer (Flutter)</a>
+    <div>Easy Apply</div>
+    <div>Groww</div>
+    <div>Remote</div>
+  </div>
+</body>
+</html>
+`;
