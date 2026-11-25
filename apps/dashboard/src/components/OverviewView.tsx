@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Loader2, ArrowRight, Clock, Mail } from 'lucide-react';
+import { Loader2, ArrowRight, Clock, Mail, Play } from 'lucide-react';
 import { ConfirmationModal } from './ConfirmationModal.js';
 import { AlertBanner } from './ui/AlertBanner.js';
 import { MetricCard } from './ui/MetricCard.js';
@@ -74,6 +74,12 @@ export function OverviewView({
   const [pipelineResult, setPipelineResult] = useState<string | null>(null);
   const [syncingGmail, setSyncingGmail] = useState(false);
   const [gmailSyncResult, setGmailSyncResult] = useState<string | null>(null);
+  const [runningCronIds, setRunningCronIds] = useState<Record<string, boolean>>({});
+  const [cronFeedback, setCronFeedback] = useState<{
+    id: string;
+    ok: boolean;
+    message: string;
+  } | null>(null);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -224,6 +230,39 @@ export function OverviewView({
       setPipelineResult(err instanceof Error ? err.message : String(err));
     } finally {
       setPipelineRunning(false);
+    }
+  };
+
+  const handleRunCron = async (jobId: string, jobName: string) => {
+    try {
+      setRunningCronIds((prev) => ({ ...prev, [jobId]: true }));
+      setCronFeedback(null);
+      const res = await apiFetch(`${apiBase}/api/cron/${encodeURIComponent(jobId)}/run`, {
+        method: 'POST',
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        throw new Error(json.error || `Failed to run ${jobName} (${res.status})`);
+      }
+      setCronFeedback({
+        id: jobId,
+        ok: true,
+        message: `${jobName}: ${json.message || 'Triggered successfully.'}`,
+      });
+      await loadOverview();
+      onDataRefresh?.();
+    } catch (err) {
+      setCronFeedback({
+        id: jobId,
+        ok: false,
+        message: `${jobName}: ${err instanceof Error ? err.message : String(err)}`,
+      });
+    } finally {
+      setRunningCronIds((prev) => ({ ...prev, [jobId]: false }));
     }
   };
 
@@ -477,6 +516,26 @@ export function OverviewView({
           </span>
         </div>
 
+        {cronFeedback && (
+          <div
+            role="status"
+            className={`mb-3 p-2.5 rounded-[6px] border text-[12px] flex items-center justify-between gap-2 ${
+              cronFeedback.ok
+                ? 'bg-surface border-accent/40 text-fg'
+                : 'bg-state-danger-bg border-state-danger-border text-state-danger-fg'
+            }`}
+          >
+            <span>{cronFeedback.message}</span>
+            <button
+              type="button"
+              onClick={() => setCronFeedback(null)}
+              className="text-fg-muted hover:text-fg text-[11px] shrink-0 cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           {(data.cronJobs || [
             {
@@ -518,32 +577,45 @@ export function OverviewView({
                 <p className="text-[12px] text-fg-muted mt-1 leading-snug">{job.description}</p>
               </div>
 
-              <div className="pt-2 border-t border-border/60 flex items-center justify-between text-[12px]">
-                <span className="text-fg-muted">{job.schedule}</span>
-                <div
-                  className="text-right"
-                  title={job.lastRunAt ? new Date(job.lastRunAt).toLocaleString() : undefined}
-                >
-                  <div className="flex items-center gap-1.5 justify-end">
+              <div className="pt-2 border-t border-border/60 flex items-center justify-between gap-2 text-[12px]">
+                <div>
+                  <span className="text-fg-muted block">{job.schedule}</span>
+                  <div
+                    className="flex items-center gap-1.5 mt-0.5"
+                    title={job.lastRunAt ? new Date(job.lastRunAt).toLocaleString() : undefined}
+                  >
                     <span
                       className={`inline-block w-1.5 h-1.5 rounded-full ${
                         job.lastRunAt ? 'bg-state-ok-fg' : 'bg-fg-muted/40'
                       }`}
                       aria-hidden="true"
                     />
-                    <span className="font-medium font-mono text-fg text-[12px]">
+                    <span className="font-medium font-mono text-fg text-[11px]">
                       {formatRelativeTime(job.lastRunAt)}
                     </span>
+                    {job.lastRunAt && (
+                      <span className="text-[10px] text-fg-muted font-mono">
+                        ·{' '}
+                        {new Date(job.lastRunAt).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </span>
+                    )}
                   </div>
-                  {job.lastRunAt && (
-                    <span className="text-[10px] text-fg-muted font-mono block">
-                      {new Date(job.lastRunAt).toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </span>
-                  )}
                 </div>
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  icon={Play}
+                  loading={Boolean(runningCronIds[job.id])}
+                  disabled={Boolean(runningCronIds[job.id])}
+                  onClick={() => void handleRunCron(job.id, job.name)}
+                  aria-label={`Run ${job.name} now`}
+                  data-testid={`run-cron-${job.id}`}
+                >
+                  {runningCronIds[job.id] ? 'Running...' : 'Run Now'}
+                </Button>
               </div>
             </div>
           ))}

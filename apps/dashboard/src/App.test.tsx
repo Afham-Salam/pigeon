@@ -1155,4 +1155,168 @@ describe('Dashboard App & Operations Components', () => {
       expect(container?.textContent).toContain('Owner Authentication');
     });
   });
+
+  describe('Manual Cron Run Buttons in Overview', () => {
+    it('renders Run Now button for each cron job and triggers POST /api/cron/:id/run', async () => {
+      const triggeredUrls: string[] = [];
+      let overviewFetchCount = 0;
+
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((url: string, init?: RequestInit) => {
+          const u = url.toString();
+          if (u.includes('/api/cron/') && u.endsWith('/run') && init?.method === 'POST') {
+            triggeredUrls.push(u);
+            const id = u.split('/api/cron/')[1]?.split('/run')[0] || '';
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                ok: true,
+                id,
+                message: `Triggered ${id} successfully.`,
+              }),
+            });
+          }
+          if (u.includes('/api/overview')) {
+            overviewFetchCount++;
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                sendsToday: 3,
+                effectiveCap: 15,
+                dailyCap: 20,
+                bounceRate: 0,
+                failureRate: 0,
+                jobsByStatus: { routed: 5 },
+                jobsByRoute: { auto_email: 2 },
+                manualWaitingCount: 4,
+                authHealth: { status: 'ok', reason: null, checked_at: new Date().toISOString() },
+                dryRun: true,
+                killSwitch: false,
+                cronJobs: [
+                  {
+                    id: 'ingest',
+                    name: 'Job Ingestion',
+                    cron: '0 */3 * * *',
+                    schedule: 'Every 3 hours',
+                    description: 'Fetches active ATS & job boards, purges stale records',
+                    lastRunAt: null,
+                  },
+                  {
+                    id: 'score',
+                    name: 'Scoring & Pipeline',
+                    cron: '*/10 * * * *',
+                    schedule: 'Every 10 minutes',
+                    description: 'Evaluates new jobs with LLM & syncs Google Sheets',
+                    lastRunAt: null,
+                  },
+                  {
+                    id: 'inbox',
+                    name: 'Inbox & Health',
+                    cron: '*/15 * * * *',
+                    schedule: 'Every 15 minutes',
+                    description: 'Polls Gmail for employer replies & verifies auth',
+                    lastRunAt: null,
+                  },
+                ],
+              }),
+            });
+          }
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+        }),
+      );
+
+      await act(async () => {
+        root?.render(<App />);
+      });
+
+      const ingestBtn = container?.querySelector(
+        '[data-testid="run-cron-ingest"]',
+      ) as HTMLButtonElement | null;
+      const scoreBtn = container?.querySelector(
+        '[data-testid="run-cron-score"]',
+      ) as HTMLButtonElement | null;
+      const inboxBtn = container?.querySelector(
+        '[data-testid="run-cron-inbox"]',
+      ) as HTMLButtonElement | null;
+
+      expect(ingestBtn).not.toBeNull();
+      expect(scoreBtn).not.toBeNull();
+      expect(inboxBtn).not.toBeNull();
+
+      const beforeCount = overviewFetchCount;
+
+      await act(async () => {
+        ingestBtn?.click();
+      });
+      expect(triggeredUrls).toContain('/api/cron/ingest/run');
+      expect(container?.textContent).toContain('Job Ingestion: Triggered ingest successfully.');
+      expect(overviewFetchCount).toBeGreaterThan(beforeCount);
+
+      await act(async () => {
+        scoreBtn?.click();
+      });
+      expect(triggeredUrls).toContain('/api/cron/score/run');
+      expect(container?.textContent).toContain('Scoring & Pipeline: Triggered score successfully.');
+
+      await act(async () => {
+        inboxBtn?.click();
+      });
+      expect(triggeredUrls).toContain('/api/cron/inbox/run');
+      expect(container?.textContent).toContain('Inbox & Health: Triggered inbox successfully.');
+    });
+
+    it('displays error feedback when manual cron run fails', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn((url: string, init?: RequestInit) => {
+          const u = url.toString();
+          if (u.includes('/api/cron/score/run') && init?.method === 'POST') {
+            return Promise.resolve({
+              ok: false,
+              status: 500,
+              json: async () => ({ error: 'Queue unavailable' }),
+            });
+          }
+          if (u.includes('/api/overview')) {
+            return Promise.resolve({
+              ok: true,
+              status: 200,
+              json: async () => ({
+                sendsToday: 0,
+                effectiveCap: 20,
+                dailyCap: 20,
+                bounceRate: 0,
+                failureRate: 0,
+                jobsByStatus: {},
+                jobsByRoute: {},
+                manualWaitingCount: 0,
+                authHealth: { status: 'ok', reason: null, checked_at: null },
+                dryRun: true,
+                killSwitch: false,
+              }),
+            });
+          }
+          return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+        }),
+      );
+
+      await act(async () => {
+        root?.render(<App />);
+      });
+
+      const scoreBtn = container?.querySelector(
+        '[data-testid="run-cron-score"]',
+      ) as HTMLButtonElement | null;
+      expect(scoreBtn).not.toBeNull();
+
+      await act(async () => {
+        scoreBtn?.click();
+      });
+
+      expect(container?.textContent).toContain('Scoring & Pipeline: Queue unavailable');
+    });
+  });
 });

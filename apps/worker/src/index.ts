@@ -3431,6 +3431,177 @@ app.post('/api/retention/purge', async (c) => {
   return c.json({ ok: true, ...result, deletedFilteredCount: filteredResult.deletedCount });
 });
 
+async function recordCronExecution(
+  config: KVNamespace,
+  db: D1Database,
+  cronKey: string,
+  nowIso: string,
+  trigger?: 'manual',
+): Promise<void> {
+  try {
+    const raw = await config.get('cron:last_runs');
+    const runs = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    runs[cronKey] = nowIso;
+    await config.put('cron:last_runs', JSON.stringify(runs));
+  } catch (err) {
+    logger.error('Error recording cron last run in KV', err);
+  }
+
+  try {
+    const payload = trigger ? { cron: cronKey, trigger } : { cron: cronKey };
+    await db
+      .prepare(
+        `INSERT INTO events (id, entity, entity_id, type, payload, created_at)
+         VALUES (?, 'system', 'cron', 'cron_executed', ?, ?)`,
+      )
+      .bind(crypto.randomUUID(), JSON.stringify(payload), nowIso)
+      .run();
+  } catch {
+    // Non-blocking
+  }
+}
+
+async function executeIngestCron(env: Bindings): Promise<{
+  enabledSources: string[];
+  expiredManualCount: number;
+  purgedDescriptionsCount: number;
+  purgedFilteredCount: number;
+  appConfig: AppConfig;
+  notifier: Notifier;
+}> {
+  const enabledSources = await getEnabledSources(env.CONFIG);
+  for (const source of enabledSources) {
+    await env.JOBS_QUEUE.send({ source });
+  }
+  // Housekeeping: expire 30-day-old manual_pending items
+  const expiredManual = await expireStaleManualPending(env.DB);
+  // Housekeeping: purge >90-day job descriptions for unapplied jobs and >14-day filtered_out noise
+  const purgedDescriptions = await purgeExpiredJobDescriptions({ db: env.DB });
+  const purgedFiltered = await purgeOldFilteredJobs({ db: env.DB });
+  const appConfig = await getConfig(env, env.DB);
+  // Send daily digest & check failure rate alert
+  const notifier = await createWorkerNotifier(env, appConfig);
+  await sendManualDailyDigest({ db: env.DB, notifier });
+  await checkFailureRateAlert({ db: env.DB, notifier });
+
+  return {
+    enabledSources,
+    expiredManualCount: expiredManual.expired_count,
+    purgedDescriptionsCount: purgedDescriptions.purgedCount,
+    purgedFilteredCount: purgedFiltered.deletedCount,
+    appConfig,
+    notifier,
+  };
+}
+
+const CRON_KEY_BY_ID: Record<string, string> = {
+  ingest: '0 */3 * * *',
+  score: '*/10 * * * *',
+  inbox: '*/15 * * * *',
+};
+
+// 13. POST /api/cron/:id/run: Manually triggers an individual scheduled cron job
+app.post('/api/cron/:id/run', async (c) => {
+  const id = c.req.param('id');
+  const cronKey = CRON_KEY_BY_ID[id];
+  if (!cronKey) {
+    return c.json({ error: `Unknown cron job: ${id}` }, 404);
+  }
+
+  const nowIso = new Date().toISOString();
+
+  if (id === 'ingest') {
+    const result = await executeIngestCron(c.env);
+    await recordCronExecution(c.env.CONFIG, c.env.DB, cronKey, nowIso, 'manual');
+    return c.json({
+      ok: true,
+      id,
+      cron: cronKey,
+      lastRunAt: nowIso,
+      message: `Enqueued ingestion for ${result.enabledSources.length} source(s) and ran housekeeping.`,
+      details: {
+        sourcesEnqueued: result.enabledSources.length,
+        sources: result.enabledSources,
+        expiredManualCount: result.expiredManualCount,
+        purgedDescriptionsCount: result.purgedDescriptionsCount,
+        purgedFilteredCount: result.purgedFilteredCount,
+      },
+    });
+  }
+
+  if (id === 'score') {
+    await c.env.JOBS_QUEUE.send({ action: 'score_and_route' });
+    const enqueuedActions = ['score_and_route'];
+    const appConfig = await getConfig(c.env, c.env.DB);
+    const hasGoogleOAuth = appConfig.hasGoogleOAuth();
+    if (hasGoogleOAuth) {
+      await c.env.JOBS_QUEUE.send({ action: 'sync_sheet' });
+      enqueuedActions.push('sync_sheet');
+    }
+    await recordCronExecution(c.env.CONFIG, c.env.DB, cronKey, nowIso, 'manual');
+    return c.json({
+      ok: true,
+      id,
+      cron: cronKey,
+      lastRunAt: nowIso,
+      message: hasGoogleOAuth
+        ? 'Enqueued job scoring pipeline and Google Sheet sync.'
+        : 'Enqueued job scoring pipeline (Google Sheet sync skipped: OAuth not configured).',
+      details: {
+        enqueuedActions,
+      },
+    });
+  }
+
+  // id === 'inbox'
+  const appConfig = await getConfig(c.env, c.env.DB);
+  const hasGoogleOAuth = appConfig.hasGoogleOAuth();
+  const enqueuedActions: string[] = [];
+  let authHealthStatus: string | null = null;
+
+  if (hasGoogleOAuth) {
+    await c.env.JOBS_QUEUE.send({ action: 'poll_inbox' });
+    await c.env.JOBS_QUEUE.send({ action: 'sync_gmail_alerts' });
+    enqueuedActions.push('poll_inbox', 'sync_gmail_alerts');
+
+    try {
+      const notifier = await createWorkerNotifier(c.env, appConfig);
+      const googleOAuth = appConfig.getGoogleOAuth();
+      const tokenEncryptionKey = getTokenKey(c.env);
+      const secrets: GoogleOAuthSecrets = {
+        clientId: googleOAuth.clientId as string,
+        clientSecret: googleOAuth.clientSecret as string,
+        tokenEncryptionKey,
+      };
+      const health = await pingGoogleAuthHealth({
+        config: c.env.CONFIG,
+        secrets,
+        notifier,
+      });
+      authHealthStatus = health.status;
+    } catch (err) {
+      logger.error('Error during manual Google auth health ping', err);
+      authHealthStatus = 'error';
+    }
+  }
+
+  await recordCronExecution(c.env.CONFIG, c.env.DB, cronKey, nowIso, 'manual');
+  return c.json({
+    ok: true,
+    id,
+    cron: cronKey,
+    lastRunAt: nowIso,
+    message: hasGoogleOAuth
+      ? `Enqueued inbox poll & Gmail alerts sync; Google auth health: ${authHealthStatus ?? 'checked'}.`
+      : 'Google OAuth not configured; skipped Gmail inbox poll and auth check.',
+    details: {
+      googleOAuthConfigured: hasGoogleOAuth,
+      enqueuedActions,
+      authHealthStatus,
+    },
+  });
+});
+
 // -------------------------------------------------------------
 // Local Development Trigger Routes (Strictly ENV=dev only)
 // -------------------------------------------------------------
@@ -3733,40 +3904,9 @@ export default {
     const nowIso = new Date().toISOString();
     const cronKey = _event?.cron || '0 */3 * * *';
 
-    try {
-      const raw = await env.CONFIG.get('cron:last_runs');
-      const runs = raw ? JSON.parse(raw) : {};
-      runs[cronKey] = nowIso;
-      await env.CONFIG.put('cron:last_runs', JSON.stringify(runs));
-    } catch (err) {
-      logger.error('Error recording cron last run in KV', err);
-    }
+    await recordCronExecution(env.CONFIG, env.DB, cronKey, nowIso);
 
-    try {
-      await env.DB.prepare(
-        `INSERT INTO events (id, entity, entity_id, type, payload, created_at)
-         VALUES (?, 'system', 'cron', 'cron_executed', ?, ?)`,
-      )
-        .bind(crypto.randomUUID(), JSON.stringify({ cron: cronKey }), nowIso)
-        .run();
-    } catch {
-      // Non-blocking
-    }
-
-    const enabledSources = await getEnabledSources(env.CONFIG);
-    for (const source of enabledSources) {
-      await env.JOBS_QUEUE.send({ source });
-    }
-    // Housekeeping: expire 30-day-old manual_pending items
-    await expireStaleManualPending(env.DB);
-    // Housekeeping: purge >90-day job descriptions for unapplied jobs and >14-day filtered_out noise
-    await purgeExpiredJobDescriptions({ db: env.DB });
-    await purgeOldFilteredJobs({ db: env.DB });
-    const appConfig = await getConfig(env, env.DB);
-    // Send daily digest & check failure rate alert
-    const notifier = await createWorkerNotifier(env, appConfig);
-    await sendManualDailyDigest({ db: env.DB, notifier });
-    await checkFailureRateAlert({ db: env.DB, notifier });
+    const { appConfig, notifier } = await executeIngestCron(env);
 
     // Score and route pending jobs on the 10-minute cron trigger (*/10 * * * *)
     if (_event.cron === '*/10 * * * *') {

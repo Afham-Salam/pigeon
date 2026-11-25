@@ -621,4 +621,138 @@ Alex Mercer`;
     expect(gh?.last_error).toBe('Test error');
     expect(gh?.parser_suspect).toBe(false);
   });
+
+  describe('POST /api/cron/:id/run', () => {
+    it('manually triggers ingest cron, enqueues enabled sources, and records last run + event', async () => {
+      await workerEnv.CONFIG.put('sources:enabled', JSON.stringify(['remoteok', 'remotive']));
+      const enqueued: unknown[] = [];
+      const testEnv: Bindings = {
+        ...workerEnv,
+        JOBS_QUEUE: {
+          async send(msg: unknown) {
+            enqueued.push(msg);
+          },
+        } as unknown as Queue,
+      };
+
+      const res = await app.fetch(
+        new Request('http://localhost/api/cron/ingest/run', {
+          method: 'POST',
+          headers: { Origin: 'http://localhost:5173' },
+        }),
+        testEnv,
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        id: string;
+        cron: string;
+        lastRunAt: string;
+        details: { sourcesEnqueued: number; sources: string[] };
+      };
+      expect(body.ok).toBe(true);
+      expect(body.id).toBe('ingest');
+      expect(body.cron).toBe('0 */3 * * *');
+      expect(body.details.sources).toEqual(['remoteok', 'remotive']);
+      expect(enqueued).toEqual([{ source: 'remoteok' }, { source: 'remotive' }]);
+
+      const runsRaw = await workerEnv.CONFIG.get('cron:last_runs');
+      const runs = runsRaw ? (JSON.parse(runsRaw) as Record<string, string>) : {};
+      expect(runs['0 */3 * * *']).toBe(body.lastRunAt);
+
+      const evt = await workerEnv.DB.prepare(
+        `SELECT payload FROM events WHERE type = 'cron_executed' ORDER BY created_at DESC LIMIT 1`,
+      ).first<{ payload: string }>();
+      expect(evt).not.toBeNull();
+      expect(JSON.parse(evt?.payload ?? '{}')).toEqual({
+        cron: '0 */3 * * *',
+        trigger: 'manual',
+      });
+    });
+
+    it('manually triggers score cron and enqueues score_and_route and sync_sheet', async () => {
+      const enqueued: unknown[] = [];
+      const testEnv: Bindings = {
+        ...workerEnv,
+        JOBS_QUEUE: {
+          async send(msg: unknown) {
+            enqueued.push(msg);
+          },
+        } as unknown as Queue,
+      };
+
+      const res = await app.fetch(
+        new Request('http://localhost/api/cron/score/run', {
+          method: 'POST',
+          headers: { Origin: 'http://localhost:5173' },
+        }),
+        testEnv,
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        id: string;
+        cron: string;
+        lastRunAt: string;
+        details: { enqueuedActions: string[] };
+      };
+      expect(body.ok).toBe(true);
+      expect(body.id).toBe('score');
+      expect(body.cron).toBe('*/10 * * * *');
+      expect(body.details.enqueuedActions).toEqual(['score_and_route', 'sync_sheet']);
+      expect(enqueued).toEqual([{ action: 'score_and_route' }, { action: 'sync_sheet' }]);
+    });
+
+    it('manually triggers inbox cron, enqueues inbox tasks, and pings Google auth health', async () => {
+      const enqueued: unknown[] = [];
+      const testEnv: Bindings = {
+        ...workerEnv,
+        JOBS_QUEUE: {
+          async send(msg: unknown) {
+            enqueued.push(msg);
+          },
+        } as unknown as Queue,
+      };
+
+      const res = await app.fetch(
+        new Request('http://localhost/api/cron/inbox/run', {
+          method: 'POST',
+          headers: { Origin: 'http://localhost:5173' },
+        }),
+        testEnv,
+      );
+
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        id: string;
+        cron: string;
+        details: {
+          googleOAuthConfigured: boolean;
+          enqueuedActions: string[];
+          authHealthStatus: string | null;
+        };
+      };
+      expect(body.ok).toBe(true);
+      expect(body.id).toBe('inbox');
+      expect(body.cron).toBe('*/15 * * * *');
+      expect(body.details.googleOAuthConfigured).toBe(true);
+      expect(body.details.enqueuedActions).toEqual(['poll_inbox', 'sync_gmail_alerts']);
+      expect(enqueued).toEqual([{ action: 'poll_inbox' }, { action: 'sync_gmail_alerts' }]);
+      expect(body.details.authHealthStatus).toBe('ok');
+    });
+
+    it('returns 404 for unknown cron job id', async () => {
+      const res = await app.fetch(
+        new Request('http://localhost/api/cron/nonexistent/run', {
+          method: 'POST',
+          headers: { Origin: 'http://localhost:5173' },
+        }),
+        workerEnv,
+      );
+      expect(res.status).toBe(404);
+    });
+  });
 });
