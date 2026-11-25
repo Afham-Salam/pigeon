@@ -1,6 +1,7 @@
 import type { PortalParser, ParsedAlertJob } from '../types.js';
 import { cleanTrackingUrl } from '../tracking-cleaner.js';
 import { stripHtml } from '../../sources/html-utils.js';
+import { extractCompanyFromCardSnippet, isPlausibleCompanyCandidate } from './shared.js';
 
 export const indeedParser: PortalParser = {
   portal: 'indeed',
@@ -23,11 +24,11 @@ export const indeedParser: PortalParser = {
     while ((match = linkRegex.exec(html)) !== null) {
       const rawHref = match[1] ?? '';
       const rawTitle = match[2] ?? '';
-      const cleanTitle = stripHtml(rawTitle);
+      const cleanAnchorText = stripHtml(rawTitle);
 
       if (
-        !cleanTitle ||
-        /^(view|see|apply|read|click|more|unsubscribe|indeed|manage|privacy)/i.test(cleanTitle)
+        !cleanAnchorText ||
+        /^(view|see|apply|read|click|more|unsubscribe|indeed|manage|privacy)/i.test(cleanAnchorText)
       ) {
         continue;
       }
@@ -38,6 +39,20 @@ export const indeedParser: PortalParser = {
       }
       seenUrls.add(applyUrl);
 
+      const lines = cleanAnchorText
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+
+      let cleanTitle = cleanAnchorText;
+      let company = 'Unknown';
+      if (lines.length >= 2 && lines[0] && lines[1]) {
+        cleanTitle = lines[0];
+        if (isPlausibleCompanyCandidate(lines[1], cleanTitle)) {
+          company = lines[1];
+        }
+      }
+
       const afterLink = html.slice(match.index + match[0].length, match.index + 1200);
       const nextCardBoundary = afterLink.search(
         /<div class="job-result"|<div class="job"|<a\b[^>]*href="[^"]*(?:indeed\.com\/(?:viewjob|rc\/clk|job\/)|\/viewjob)/i,
@@ -46,19 +61,14 @@ export const indeedParser: PortalParser = {
         nextCardBoundary !== -1 ? afterLink.slice(0, nextCardBoundary) : afterLink;
 
       // Extract company
-      let company = 'Unknown';
-      const companyMatch =
-        contextSnippet.match(
+      if (company === 'Unknown') {
+        const extractedCompany = extractCompanyFromCardSnippet(
+          contextSnippet,
+          cleanTitle,
           /(?:class="[^"]*(?:company|companyName|jobsearch-Company)[^"]*"[^>]*>|<span[^>]*class="[^"]*company_location[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|p|a)>/i,
-        ) ||
-        contextSnippet.match(
-          /<\/a>[\s\S]*?<(?:span|div|p|td)[^>]*>([\s\S]*?)<\/(?:span|div|p|td)>/i,
         );
-
-      if (companyMatch?.[1]) {
-        const candidate = stripHtml(companyMatch[1]).trim();
-        if (candidate && candidate !== cleanTitle && candidate.length < 100) {
-          company = candidate;
+        if (extractedCompany) {
+          company = extractedCompany;
         }
       }
 

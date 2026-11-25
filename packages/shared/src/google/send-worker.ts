@@ -6,6 +6,7 @@ import { validateCoverLetter } from '../applications/validator.js';
 import { assertSafeHeader } from './mime.js';
 import { getGoogleAuthHealth, type KVLike, GoogleAuthError, setGoogleAuthHealth } from './auth.js';
 import { isKillSwitchActive, getEffectiveDryRun } from '../safety.js';
+import { isTrackableCompany } from '../sources/dedupe.js';
 import { GoogleRateLimitError, GoogleServerError, GoogleRecipientError } from './sender.js';
 import type { GmailSender, SendEmailResult } from './types.js';
 
@@ -324,8 +325,8 @@ export async function validatePreSend(options: {
     };
   }
 
-  // 4. Company cooldown: not contacted in last 90 days (initial applications only)
-  if (app.kind !== 'follow_up') {
+  // 4. Company cooldown: not contacted in last 90 days (initial applications only, trackable companies only)
+  if (app.kind !== 'follow_up' && isTrackableCompany(app.company_normalized)) {
     const contacted = await db
       .prepare(
         `SELECT company_normalized, last_contacted_at
@@ -501,16 +502,18 @@ export async function sendApplicationEmail(
         .bind(existing.gmailMessageId, existing.gmailThreadId, nowIso, nowIso, app.id)
         .run();
 
-      await db
-        .prepare(
-          `INSERT INTO companies_contacted (company_normalized, last_contacted_at, last_channel)
-           VALUES (?, ?, 'email')
-           ON CONFLICT(company_normalized) DO UPDATE SET
-             last_contacted_at = excluded.last_contacted_at,
-             last_channel = excluded.last_channel`,
-        )
-        .bind(app.company_normalized, nowIso)
-        .run();
+      if (isTrackableCompany(app.company_normalized)) {
+        await db
+          .prepare(
+            `INSERT INTO companies_contacted (company_normalized, last_contacted_at, last_channel)
+             VALUES (?, ?, 'email')
+             ON CONFLICT(company_normalized) DO UPDATE SET
+               last_contacted_at = excluded.last_contacted_at,
+               last_channel = excluded.last_channel`,
+          )
+          .bind(app.company_normalized, nowIso)
+          .run();
+      }
 
       return { success: true };
     }
@@ -712,17 +715,19 @@ export async function sendApplicationEmail(
       .bind(sendResult.gmailMessageId, sendResult.gmailThreadId, nowIso, nowIso, app.id)
       .run();
 
-    // Record company contacted
-    await db
-      .prepare(
-        `INSERT INTO companies_contacted (company_normalized, last_contacted_at, last_channel)
-         VALUES (?, ?, 'email')
-         ON CONFLICT(company_normalized) DO UPDATE SET
-           last_contacted_at = excluded.last_contacted_at,
-           last_channel = excluded.last_channel`,
-      )
-      .bind(app.company_normalized, nowIso)
-      .run();
+    // Record company contacted (only for real identifiable companies)
+    if (isTrackableCompany(app.company_normalized)) {
+      await db
+        .prepare(
+          `INSERT INTO companies_contacted (company_normalized, last_contacted_at, last_channel)
+           VALUES (?, ?, 'email')
+           ON CONFLICT(company_normalized) DO UPDATE SET
+             last_contacted_at = excluded.last_contacted_at,
+             last_channel = excluded.last_channel`,
+        )
+        .bind(app.company_normalized, nowIso)
+        .run();
+    }
 
     return { success: true };
   } catch (err) {

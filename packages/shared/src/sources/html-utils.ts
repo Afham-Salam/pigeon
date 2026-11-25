@@ -21,7 +21,15 @@ export function stripHtml(input: string | null | undefined): string {
       .replace(/<[^>]+>/g, '')
       // Decode remaining HTML entities
       .replace(/&nbsp;/g, ' ')
-      .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+      .replace(/&middot;/g, '·')
+      .replace(/&bull;/g, '•')
+      .replace(/&ndash;/g, '–')
+      .replace(/&mdash;/g, '—')
+      .replace(/&rsquo;|&lsquo;/g, "'")
+      .replace(/&ldquo;|&rdquo;/g, '"')
+      .replace(/&hellip;/g, '...')
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+      .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
       // Normalize whitespace while preserving paragraphs
       .replace(/[ \t]+/g, ' ')
       .replace(/\n\s*\n\s*\n+/g, '\n\n')

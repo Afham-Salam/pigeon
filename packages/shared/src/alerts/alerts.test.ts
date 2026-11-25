@@ -596,6 +596,88 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       expect(jobs[0]?.apply_url).toBe('https://notification.bebee.com/c/12345/67890?id=12345');
     });
 
+    it('splits multi-line card anchors cleanly for Glassdoor, LinkedIn, beBee, and plain-cell Indeed alerts', () => {
+      const glassdoorHtml = `
+        <a href="https://www.glassdoor.com/job-listing/create">Create</a>
+        <a href="https://www.glassdoor.com/job-listing/bonc-flutter?jl=101">
+          <div>BONC</div>
+          <div>Flutter Developer</div>
+          <div>Remote</div>
+          <div>₹11K - ₹20K (Employer est.)</div>
+          <div>Easy Apply</div>
+          <div>4d</div>
+        </a>
+        <a href="https://www.glassdoor.com/job-listing/nikah-flutter?jl=102">
+          <div>Nikah Forever 3.3 ★</div>
+          <div>SDE 1 (Flutter)</div>
+          <div>Delhi</div>
+          <div>5d</div>
+        </a>
+      `;
+      const gdJobs = getParser('glassdoor').parse(glassdoorHtml);
+      expect(gdJobs).toHaveLength(2);
+      expect(gdJobs[0]).toMatchObject({
+        title: 'Flutter Developer',
+        company: 'BONC',
+        location: 'Remote',
+        salary_raw: '₹11K - ₹20K (Employer est.)',
+        description: 'Flutter Developer at BONC - Remote',
+      });
+      expect(gdJobs[1]).toMatchObject({
+        title: 'SDE 1 (Flutter)',
+        company: 'Nikah Forever',
+        location: 'Delhi',
+      });
+
+      const linkedInHtml = `
+        <a href="https://www.linkedin.com/jobs/view/112233">
+          <div>Mobile Engineer (Flutter)</div>
+          <div>Tarkio &middot; India (Remote)</div>
+          <div>₹350K-₹450K / year</div>
+        </a>
+      `;
+      const liJobs = getParser('linkedin').parse(linkedInHtml);
+      expect(liJobs).toHaveLength(1);
+      expect(liJobs[0]).toMatchObject({
+        title: 'Mobile Engineer (Flutter)',
+        company: 'Tarkio',
+        location: 'India (Remote)',
+        salary_raw: '₹350K-₹450K / year',
+      });
+
+      const bebeeHtml = `
+        <a href="https://notification.bebee.com/c/1/2">،مرحبًا</a>
+        <a href="https://notification.bebee.com/c/1/3">إدارة التنبيهات</a>
+        <a href="https://notification.bebee.com/c/1/4">
+          <div>C</div>
+          <div>Mobile App Developer</div>
+          <div>CignaAbu Dhabi</div>
+        </a>
+      `;
+      const bbJobs = getParser('bebee').parse(bebeeHtml);
+      expect(bbJobs).toHaveLength(1);
+      expect(bbJobs[0]).toMatchObject({
+        title: 'Mobile App Developer',
+        company: 'Cigna',
+        location: 'Abu Dhabi',
+      });
+
+      const indeedHtml = `
+        <div>
+          <a href="https://www.indeed.com/viewjob?jk=abc123">Senior Flutter Developer</a>
+          <div>Easy Apply</div>
+          <div>Acme Mobile Pvt Ltd</div>
+          <div>Bengaluru, KA</div>
+        </div>
+      `;
+      const inJobs = getParser('indeed').parse(indeedHtml);
+      expect(inJobs).toHaveLength(1);
+      expect(inJobs[0]).toMatchObject({
+        title: 'Senior Flutter Developer',
+        company: 'Acme Mobile Pvt Ltd',
+      });
+    });
+
     it('Fallback parser extracts job links from generic HTML', () => {
       const fallbackHtml = `
         <div>

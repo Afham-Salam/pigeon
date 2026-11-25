@@ -1,5 +1,5 @@
 import type { D1LikeDatabase } from '../state-machine.js';
-import { normalizeCompanyName } from '../sources/dedupe.js';
+import { isTrackableCompany, normalizeCompanyName } from '../sources/dedupe.js';
 
 export interface SkippableJob {
   company: string;
@@ -42,8 +42,8 @@ export async function evaluateSkipChecks(
     }
   }
 
-  // 2. Check Companies Contacted within 90 days
-  if (compNorm) {
+  // 2. Check Companies Contacted within 90 days (skip untrackable placeholders like 'unknown')
+  if (isTrackableCompany(compNorm)) {
     const contactRow = await db
       .prepare(
         `SELECT company_normalized, last_contacted_at FROM companies_contacted WHERE company_normalized = ? LIMIT 1`,

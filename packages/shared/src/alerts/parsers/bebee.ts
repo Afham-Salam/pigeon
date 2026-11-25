@@ -1,12 +1,16 @@
 import type { PortalParser, ParsedAlertJob } from '../types.js';
 import { cleanTrackingUrl } from '../tracking-cleaner.js';
 import { stripHtml } from '../../sources/html-utils.js';
+import { extractCompanyFromCardSnippet } from './shared.js';
 
 const IS_BOILERPLATE_OR_ACTION_REGEX =
-  /^(?:view|see|apply|read|click|more|unsubscribe|settings|manage|bebee|privacy|terms|show|job|عرض|التقديم|تقديم|إلغاء|تعديل|أفضل تطابق|تنبيهات|وظائف|وظيفة)/i;
+  /^(?:view|see|apply|read|click|more|unsubscribe|settings|manage|bebee|privacy|terms|show|job|create account|manage alerts|stop this alert|[،,]?\s*مرحبًا|عرض|التقديم|تقديم|إلغاء|تعديل|أفضل تطابق|تنبيهات|وظائف|وظيفة|إدارة التنبيهات|إيقاف هذا التنبيه|ألقِ نظرة|إنشاء حسابي)/i;
 
 const NON_JOB_LINK_REGEX =
   /(?:unsubscribe|preferences|settings|privacy|terms|login|facebook|twitter|linkedin|instagram|app\.adjust\.com|apple\.com|google\.com\/store)/i;
+
+const TRAILING_CITY_REGEX =
+  /(Abu Dhabi|Dubai|Sharjah|Ajman|Riyadh|Jeddah|Doha|Muscat|Kuwait|Manama|Bengaluru|Bangalore|Hyderabad|Chennai|Mumbai|Delhi|Pune|Noida|Gurgaon|London|New York|Remote|أبو ظبي|دبي|الرياض)(?:\s*[‏\u200f].*)?$/i;
 
 export const bebeeParser: PortalParser = {
   portal: 'bebee',
@@ -77,7 +81,7 @@ export const bebeeParser: PortalParser = {
       }
 
       // If no valid title could be extracted, skip this link
-      if (!title) {
+      if (!title || IS_BOILERPLATE_OR_ACTION_REGEX.test(title)) {
         continue;
       }
 
@@ -87,42 +91,80 @@ export const bebeeParser: PortalParser = {
       }
       seenUrls.add(applyUrl);
 
+      // Handle multi-line card anchors (e.g., "[monogram]\n\n Title\n\n CompanyCity")
+      const titleLines = title
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
+      if (titleLines.length >= 2 && titleLines[0] && titleLines[0].length <= 2) {
+        titleLines.shift();
+      }
+      if (titleLines.length >= 2 && titleLines[0] && titleLines[1]) {
+        title = titleLines[0];
+        const compLine = titleLines[1];
+        const cityMatch = compLine.match(TRAILING_CITY_REGEX);
+        if (cityMatch && cityMatch.index != null && cityMatch.index > 0) {
+          const splitCompany = compLine.slice(0, cityMatch.index).trim();
+          const splitCity = (cityMatch[1] ?? '').trim();
+          if (splitCompany && splitCompany.length < 100) {
+            company = splitCompany;
+          }
+          if (splitCity) {
+            location = splitCity;
+          }
+        } else if (compLine.length < 100 && compLine !== title) {
+          company = compLine;
+        }
+      } else if (titleLines[0]) {
+        title = titleLines[0];
+      }
+
+      if (IS_BOILERPLATE_OR_ACTION_REGEX.test(title)) {
+        continue;
+      }
+
       // Search for company, location, and salary in the card context.
       // If the link text was the title, details appear in afterLink.
       // If the link was an action button, details appear in beforeLink.
-      const snippet = title === cleanText ? afterLink : beforeLink;
+      const snippet = cleanText.includes(title) ? afterLink : beforeLink;
 
-      const companyMatch =
-        snippet.match(
+      if (company === 'Unknown') {
+        const extractedCompany = extractCompanyFromCardSnippet(
+          snippet,
+          title,
           /(?:class="[^"]*(?:company|company-name|employer|comp-name)[^"]*"[^>]*>|<strong[^>]*>|<span[^>]*class="[^"]*company[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|strong|p|a|td)>/i,
-        ) ||
-        snippet.match(/<\/a>[\s\S]*?<(?:span|div|p|td)[^>]*>([\s\S]*?)<\/(?:span|div|p|td)>/i) ||
-        snippet.match(
-          /([A-Z][a-zA-Z0-9&.,\s'-]{2,50})\s*(?:\||\s–\s|\s-\s)\s*(?:Managed Services|Recruitment|Staffing|Consulting|Technologies|Pvt|Ltd|Inc|LLC|Solutions)/i,
         );
-
-      if (companyMatch) {
-        const rawComp = companyMatch[1] ?? companyMatch[0];
-        const cleanComp = stripHtml(rawComp).trim();
-        if (cleanComp && cleanComp !== title && cleanComp.length < 100) {
-          company = cleanComp;
+        if (extractedCompany) {
+          company = extractedCompany;
+        } else {
+          const suffixMatch = snippet.match(
+            /([A-Z][a-zA-Z0-9&.,\s'-]{2,50})\s*(?:\||\s–\s|\s-\s)\s*(?:Managed Services|Recruitment|Staffing|Consulting|Technologies|Pvt|Ltd|Inc|LLC|Solutions)/i,
+          );
+          if (suffixMatch?.[0]) {
+            const cleanComp = stripHtml(suffixMatch[0]).trim();
+            if (cleanComp && cleanComp !== title && cleanComp.length < 100) {
+              company = cleanComp;
+            }
+          }
         }
       }
 
       // Search for location
-      const locationMatch =
-        snippet.match(
-          /(?:class="[^"]*(?:location|city|job-location)[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|p|td)>/i,
-        ) ||
-        snippet.match(
-          /(?:Abu Dhabi|Dubai|Sharjah|Riyadh|Doha|Bengaluru|Bangalore|Delhi|Mumbai|London|New York|\bRemote\b|\bHybrid\b|[A-Z][a-zA-Z\s.-]+,\s*[A-Z]{2}(?:\s+\(Hybrid\)|\s+\(Remote\))?)/i,
-        );
+      if (!location) {
+        const locationMatch =
+          snippet.match(
+            /(?:class="[^"]*(?:location|city|job-location)[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|p|td)>/i,
+          ) ||
+          snippet.match(
+            /(?:Abu Dhabi|Dubai|Sharjah|Riyadh|Doha|Bengaluru|Bangalore|Delhi|Mumbai|London|New York|\bRemote\b|\bHybrid\b|[A-Z][a-zA-Z\s.-]+,\s*[A-Z]{2}(?:\s+\(Hybrid\)|\s+\(Remote\))?)/i,
+          );
 
-      if (locationMatch) {
-        const rawLoc = locationMatch[1] ?? locationMatch[0];
-        const cleanLoc = stripHtml(rawLoc).trim();
-        if (cleanLoc && cleanLoc !== title && cleanLoc !== company) {
-          location = cleanLoc;
+        if (locationMatch) {
+          const rawLoc = locationMatch[1] ?? locationMatch[0];
+          const cleanLoc = stripHtml(rawLoc).trim();
+          if (cleanLoc && cleanLoc !== title && cleanLoc !== company) {
+            location = cleanLoc;
+          }
         }
       }
 
@@ -149,7 +191,7 @@ export const bebeeParser: PortalParser = {
         location,
         apply_url: applyUrl,
         salary_raw: salaryRaw,
-        description: null,
+        description: `${title} at ${company}${location ? ` - ${location}` : ''}`,
       });
     }
 

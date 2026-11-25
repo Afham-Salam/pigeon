@@ -455,6 +455,38 @@ describe('Phase 6: Manual Apply Workflow (Queue, Kit, Actions & Housekeeping)', 
     expect(events.filter((e) => e.type === 'status_change').length).toBe(1);
   });
 
+  it('does not insert untrackable company placeholders like unknown into companies_contacted when marking applied', async () => {
+    const { db, jobs, applications, companiesContacted } = createMockDb();
+    const nowMs = Date.now();
+
+    jobs.set('job-unknown', {
+      id: 'job-unknown',
+      title: 'Flutter Developer',
+      company: 'Unknown',
+      company_normalized: 'unknown',
+      posted_at: new Date(nowMs).toISOString(),
+      fetched_at: new Date(nowMs).toISOString(),
+    });
+
+    applications.set('app-unknown', {
+      id: 'app-unknown',
+      job_id: 'job-unknown',
+      channel: 'manual',
+      status: 'manual_pending',
+      notes: null,
+      updated_at: new Date(nowMs).toISOString(),
+    });
+
+    const res = await markApplied({
+      db,
+      applicationId: 'app-unknown',
+      nowMs,
+    });
+    expect(res.success).toBe(true);
+    expect(applications.get('app-unknown')?.['status']).toBe('manual_applied');
+    expect(companiesContacted.has('unknown')).toBe(false);
+  });
+
   it('skip stores the reason and removes item from queue', async () => {
     const { db, applications } = createMockDb();
 

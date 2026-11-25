@@ -537,6 +537,24 @@ describe('Phase 4: Rule Filters, Skip Checks, Scorer, and Router', () => {
       );
       expect(res2.skipped).toBe(false);
     });
+
+    it('does not skip untrackable placeholder companies like Unknown even if present in companies_contacted', async () => {
+      const { db, companiesContacted } = createMockDb();
+      const now = Date.now();
+      const twoDaysAgo = new Date(now - 2 * 24 * 60 * 60 * 1000).toISOString();
+
+      companiesContacted.set('unknown', twoDaysAgo);
+
+      const res = await evaluateSkipChecks(
+        {
+          company: 'Unknown',
+          company_normalized: 'unknown',
+        },
+        db,
+        now,
+      );
+      expect(res.skipped).toBe(false);
+    });
   });
 
   describe('Step 3: Scorer (LLM Matcher & Prompt Injection Defense)', () => {

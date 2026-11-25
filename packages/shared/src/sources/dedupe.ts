@@ -4,6 +4,25 @@ const COMPANY_SUFFIX_REGEX =
 const TITLE_NOISE_REGEX =
   /[([][^\])]*(?:remote|f\/m\/d|m\/f\/d|f\/m\/x|anywhere|full-?time|part-?time|contract|permanent)[^\])]*[)\]]/gi;
 
+const UNTRACKABLE_COMPANY_NAMES = new Set([
+  '',
+  'unknown',
+  'n a',
+  'na',
+  'none',
+  'confidential',
+  'undisclosed',
+]);
+
+/**
+ * Returns true if a normalized company name identifies a real company safe to
+ * track in companies_contacted (excludes empty or generic placeholders like 'unknown').
+ */
+export function isTrackableCompany(companyNormalized: string | null | undefined): boolean {
+  if (!companyNormalized) return false;
+  return !UNTRACKABLE_COMPANY_NAMES.has(companyNormalized.trim().toLowerCase());
+}
+
 export function normalizeCompanyName(company: string): string {
   if (!company) return '';
   return company

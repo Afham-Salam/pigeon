@@ -2,6 +2,7 @@ import type { D1LikeDatabase } from '../state-machine.js';
 import { transition } from '../state-machine.js';
 import type { ApplicationStatus } from '../schema.js';
 import { isFreemailContact } from '../scoring/router.js';
+import { isTrackableCompany } from '../sources/dedupe.js';
 
 export interface MarkAppliedParams {
   db: D1LikeDatabase;
@@ -99,17 +100,19 @@ export async function markApplied(params: MarkAppliedParams): Promise<{
     .bind(effectiveAppliedAt, finalNotes, nowIso, applicationId)
     .run();
 
-  // Upsert companies_contacted with last_channel = 'manual'
-  await db
-    .prepare(
-      `INSERT INTO companies_contacted (company_normalized, last_contacted_at, last_channel)
-       VALUES (?, ?, 'manual')
-       ON CONFLICT(company_normalized) DO UPDATE SET
-         last_contacted_at = excluded.last_contacted_at,
-         last_channel = 'manual'`,
-    )
-    .bind(app.company_normalized, effectiveAppliedAt)
-    .run();
+  // Upsert companies_contacted with last_channel = 'manual' (only for real identifiable companies)
+  if (isTrackableCompany(app.company_normalized)) {
+    await db
+      .prepare(
+        `INSERT INTO companies_contacted (company_normalized, last_contacted_at, last_channel)
+         VALUES (?, ?, 'manual')
+         ON CONFLICT(company_normalized) DO UPDATE SET
+           last_contacted_at = excluded.last_contacted_at,
+           last_channel = 'manual'`,
+      )
+      .bind(app.company_normalized, effectiveAppliedAt)
+      .run();
+  }
 
   return { success: true };
 }
