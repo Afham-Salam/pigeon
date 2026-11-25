@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { D1LikeDatabase } from '../state-machine.js';
 import type { Profile } from '../profile.js';
 import { encryptRefreshToken, decryptRefreshToken } from './crypto.js';
+import { RestGmailSender } from './sender.js';
 import { assertSafeHeader, toBase64Url, buildMimeMessage } from './mime.js';
 import {
   getGoogleAuthUrl,
@@ -3018,6 +3019,52 @@ describe('Google OAuth, Health & Gmail Sender Suite', () => {
             }
           }
         }
+      }
+    });
+  });
+
+  describe('RestGmailSender searchMessages pagination', () => {
+    it('follows nextPageToken across multiple pages up to maxResults', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              messages: [
+                { id: 'm1', threadId: 't1' },
+                { id: 'm2', threadId: 't2' },
+              ],
+              nextPageToken: 'page-2',
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              messages: [
+                { id: 'm3', threadId: 't3' },
+                { id: 'm4', threadId: 't4' },
+              ],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        );
+
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        const sender = new RestGmailSender(async () => 'mock-access-token');
+        const results = await sender.searchMessages('from:indeed.com', 3);
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(String(fetchMock.mock.calls[1]?.[0])).toContain('pageToken=page-2');
+        expect(results).toEqual([
+          { id: 'm1', threadId: 't1' },
+          { id: 'm2', threadId: 't2' },
+          { id: 'm3', threadId: 't3' },
+        ]);
+      } finally {
+        vi.unstubAllGlobals();
       }
     });
   });

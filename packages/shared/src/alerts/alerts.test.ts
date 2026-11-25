@@ -678,6 +678,36 @@ describe('Pigeon Email Alert Ingestion (Shared Suite)', () => {
       });
     });
 
+    it('extracts plain-cell company names and populates non-null description across remaining portal parsers', () => {
+      const portals: Array<{ portal: string; href: string }> = [
+        { portal: 'naukri', href: 'https://www.naukri.com/job-listings-flutter-dev-999' },
+        { portal: 'dice', href: 'https://www.dice.com/job-detail/flutter-999' },
+        { portal: 'wellfound', href: 'https://wellfound.com/jobs/999-flutter' },
+        { portal: 'instahyre', href: 'https://www.instahyre.com/job-999-flutter' },
+        { portal: 'whatjobs', href: 'https://www.whatjobs.com/job/flutter-999' },
+        { portal: 'otta', href: 'https://otta.com/jobs/flutter-999' },
+        { portal: 'ziprecruiter', href: 'https://www.ziprecruiter.com/jobs/flutter-999' },
+        { portal: 'foundit', href: 'https://www.foundit.in/job/flutter-999' },
+      ];
+
+      for (const { portal, href } of portals) {
+        const html = `
+          <div>
+            <a href="${href}">Senior Flutter Engineer</a>
+            <div>Easy Apply</div>
+            <div>MobileCraft Labs</div>
+            <div>Remote</div>
+          </div>
+        `;
+        const parsed = getParser(portal as Parameters<typeof getParser>[0]).parse(html);
+        expect(parsed, `Expected 1 job for ${portal}`).toHaveLength(1);
+        expect(parsed[0]?.company, `Expected company for ${portal}`).toBe('MobileCraft Labs');
+        expect(parsed[0]?.description, `Expected description for ${portal}`).toContain(
+          'Senior Flutter Engineer at MobileCraft Labs',
+        );
+      }
+    });
+
     it('Fallback parser extracts job links from generic HTML', () => {
       const fallbackHtml = `
         <div>

@@ -39,7 +39,7 @@ export async function pollGmailAlerts(
     notifier,
     nowIso = new Date().toISOString(),
     query = DEFAULT_GMAIL_ALERT_QUERY,
-    maxMessages = 20,
+    maxMessages = 50,
   } = options;
 
   if (typeof gmailSender.searchMessages !== 'function' || typeof gmailSender.getRawMessageBytes !== 'function') {

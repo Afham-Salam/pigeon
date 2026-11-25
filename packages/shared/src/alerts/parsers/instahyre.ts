@@ -1,6 +1,7 @@
 import type { PortalParser, ParsedAlertJob } from '../types.js';
 import { cleanTrackingUrl } from '../tracking-cleaner.js';
 import { stripHtml } from '../../sources/html-utils.js';
+import { extractCompanyFromCardSnippet } from './shared.js';
 
 export const instahyreParser: PortalParser = {
   portal: 'instahyre',
@@ -46,19 +47,13 @@ export const instahyreParser: PortalParser = {
         nextCardBoundary !== -1 ? afterLink.slice(0, nextCardBoundary) : afterLink;
 
       let company = 'Unknown';
-      const companyMatch =
-        contextSnippet.match(
-          /(?:class="[^"]*(?:company|employer|employer-name)[^"]*"[^>]*>|<strong[^>]*>|<span[^>]*class="[^"]*company[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|strong|p|a)>/i,
-        ) ||
-        contextSnippet.match(
-          /<\/a>[\s\S]*?<(?:span|div|p|td)[^>]*>([\s\S]*?)<\/(?:span|div|p|td)>/i,
-        );
-
-      if (companyMatch?.[1]) {
-        const candidate = stripHtml(companyMatch[1]).trim();
-        if (candidate && candidate !== cleanTitle && candidate.length < 100) {
-          company = candidate;
-        }
+      const extractedCompany = extractCompanyFromCardSnippet(
+        contextSnippet,
+        cleanTitle,
+        /(?:class="[^"]*(?:company|employer|employer-name)[^"]*"[^>]*>|<strong[^>]*>|<span[^>]*class="[^"]*company[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|strong|p|a)>/i,
+      );
+      if (extractedCompany) {
+        company = extractedCompany;
       }
 
       let location: string | null = null;
@@ -98,7 +93,7 @@ export const instahyreParser: PortalParser = {
         location,
         apply_url: applyUrl,
         salary_raw: salaryRaw,
-        description: null,
+        description: `${cleanTitle} at ${company}${location ? ` - ${location}` : ''}`,
       });
     }
 

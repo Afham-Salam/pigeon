@@ -153,34 +153,49 @@ export class RestGmailSender implements GmailSender {
 
   async searchMessages(
     query: string,
-    maxResults = 20,
+    maxResults = 50,
   ): Promise<Array<{ id: string; threadId: string }>> {
     const token = await this.getAccessToken();
     const encodedQ = encodeURIComponent(query);
-    const res = await fetch(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQ}&maxResults=${maxResults}`,
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      },
-    );
+    const collected: Array<{ id: string; threadId: string }> = [];
+    let pageToken: string | undefined;
 
-    if (res.status === 401) {
-      const error = new Error('GoogleAuthError: 401 Unauthorized');
-      error.name = 'GoogleAuthError';
-      throw error;
+    while (collected.length < maxResults) {
+      const pageSize = Math.min(100, maxResults - collected.length);
+      const pageParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+      const res = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodedQ}&maxResults=${pageSize}${pageParam}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
+
+      if (res.status === 401) {
+        const error = new Error('GoogleAuthError: 401 Unauthorized');
+        error.name = 'GoogleAuthError';
+        throw error;
+      }
+
+      if (res.status === 429) {
+        throw new GoogleRateLimitError('Gmail rate limit exceeded (429)');
+      }
+
+      if (!res.ok) {
+        throw new GoogleServerError(res.status, `Failed to search messages: HTTP ${res.status}`);
+      }
+
+      const raw = await res.json();
+      const data = GmailSearchMessagesResponseSchema.parse(raw);
+      if (data.messages && data.messages.length > 0) {
+        collected.push(...data.messages);
+      }
+      if (!data.nextPageToken) {
+        break;
+      }
+      pageToken = data.nextPageToken;
     }
 
-    if (res.status === 429) {
-      throw new GoogleRateLimitError('Gmail rate limit exceeded (429)');
-    }
-
-    if (!res.ok) {
-      throw new GoogleServerError(res.status, `Failed to search messages: HTTP ${res.status}`);
-    }
-
-    const raw = await res.json();
-    const data = GmailSearchMessagesResponseSchema.parse(raw);
-    return data.messages || [];
+    return collected.slice(0, maxResults);
   }
 
   async getRawMessageBytes(messageId: string): Promise<Uint8Array | null> {

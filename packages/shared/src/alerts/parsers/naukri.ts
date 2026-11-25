@@ -1,6 +1,7 @@
 import type { PortalParser, ParsedAlertJob } from '../types.js';
 import { cleanTrackingUrl } from '../tracking-cleaner.js';
 import { stripHtml } from '../../sources/html-utils.js';
+import { extractCompanyFromCardSnippet } from './shared.js';
 
 export const naukriParser: PortalParser = {
   portal: 'naukri',
@@ -47,19 +48,13 @@ export const naukriParser: PortalParser = {
 
       // Extract company
       let company = 'Unknown';
-      const companyMatch =
-        contextSnippet.match(
-          /(?:class="[^"]*(?:company|org|comp-name|company-name)[^"]*"[^>]*>|<span[^>]*class="[^"]*c-name[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|p|a)>/i,
-        ) ||
-        contextSnippet.match(
-          /<\/a>[\s\S]*?<(?:span|div|p|td)[^>]*>([\s\S]*?)<\/(?:span|div|p|td)>/i,
-        );
-
-      if (companyMatch?.[1]) {
-        const candidate = stripHtml(companyMatch[1]).trim();
-        if (candidate && candidate !== cleanTitle && candidate.length < 100) {
-          company = candidate;
-        }
+      const extractedCompany = extractCompanyFromCardSnippet(
+        contextSnippet,
+        cleanTitle,
+        /(?:class="[^"]*(?:company|org|comp-name|company-name)[^"]*"[^>]*>|<span[^>]*class="[^"]*c-name[^"]*"[^>]*>)([\s\S]*?)<\/(?:div|span|p|a)>/i,
+      );
+      if (extractedCompany) {
+        company = extractedCompany;
       }
 
       // Extract location
