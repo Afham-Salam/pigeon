@@ -21,6 +21,7 @@ export interface ProcessPipelineOptions {
     | undefined;
   nowMs?: number | undefined;
   limit?: number | undefined;
+  filterLimit?: number | undefined;
 }
 
 export interface PipelineStats {
@@ -207,7 +208,8 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
   const nowIso = new Date(nowMs).toISOString();
   const todayPrefix = nowIso.slice(0, 10); // YYYY-MM-DD
   const maxScoredPerDay = config?.max_scored_per_day ?? 200;
-  const limit = options.limit || 50;
+  const llmLimit = options.limit || 50;
+  const scanLimit = options.limit || options.filterLimit || 500;
 
   const stats: PipelineStats = {
     processed: 0,
@@ -224,7 +226,7 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
   // 1. Recover jobs stuck in status 'scored' (e.g. after a crash between scoring and routing)
   const scoredJobsRes = await db
     .prepare(`SELECT * FROM jobs WHERE status = 'scored' ORDER BY updated_at ASC LIMIT ?`)
-    .bind(limit)
+    .bind(llmLimit)
     .all<RawJobRow>();
 
   const scoredJobs = scoredJobsRes.results || [];
@@ -245,19 +247,20 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
     }
   }
 
-  // 2. Fetch pending new jobs (honoring remaining limit)
-  const remainingLimit = Math.max(0, limit - scoredJobs.length);
-  if (remainingLimit > 0) {
+  // 2. Fetch pending new jobs (scan up to scanLimit for cheap rule filters while capping LLM calls)
+  const remainingLlmLimit = Math.max(0, llmLimit - scoredJobs.length);
+  const remainingScanLimit = Math.max(0, scanLimit - scoredJobs.length);
+  let llmCallsThisRun = 0;
+
+  if (remainingScanLimit > 0) {
     const jobsRes = await db
       .prepare(`SELECT * FROM jobs WHERE status = 'new' ORDER BY fetched_at ASC LIMIT ?`)
-      .bind(remainingLimit)
+      .bind(remainingScanLimit)
       .all<RawJobRow>();
 
     const newJobs = jobsRes.results || [];
 
     for (const job of newJobs) {
-      stats.processed++;
-
       // STEP 1: RULE FILTERS (cheap, run first)
       const filterRes = evaluateRuleFilters(
         {
@@ -274,6 +277,7 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
       );
 
       if (!filterRes.passed) {
+        stats.processed++;
         stats.filtered_out++;
         await db
           .prepare(`UPDATE jobs SET filter_reason = ?, updated_at = ? WHERE id = ?`)
@@ -295,6 +299,7 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
       );
 
       if (skipRes.skipped) {
+        stats.processed++;
         stats.skipped_dnc_or_recent++;
         await db
           .prepare(`UPDATE jobs SET filter_reason = ?, updated_at = ? WHERE id = ?`)
@@ -304,17 +309,26 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
         continue;
       }
 
-      // STEP 3: SCORER (Check daily cap before invoking LLM)
+      // STEP 3: SCORER (Check per-run LLM limit and daily cap before invoking LLM)
+      if (llmCallsThisRun >= remainingLlmLimit) {
+        break;
+      }
+
+      stats.processed++;
+
       if (scoredToday >= maxScoredPerDay) {
         stats.deferred_daily_cap++;
         // Stop processing new jobs for today; leftovers wait for tomorrow
         break;
       }
 
+      llmCallsThisRun++;
+
       const scoreRes = await scorer.scoreJob(
         {
           title: job.title,
           company: job.company,
+          source_kind: job.source_kind,
           location: job.location,
           description: job.description,
           salary_raw: job.salary_raw,

@@ -667,6 +667,50 @@ describe('Phase 4: Rule Filters, Skip Checks, Scorer, and Router', () => {
       expect(prompt).toContain('<job_posting>');
       expect(prompt).toContain('</job_posting>');
     });
+
+    it('omits NO_COMPANY red flag rule for alert_email jobs so Unknown company digests are not penalized', async () => {
+      const mockLLM = new MockLLMClient([
+        JSON.stringify({
+          score: 85,
+          matched_skills: ['TypeScript'],
+          missing_skills: [],
+          red_flags: [],
+          reasons: 'Good match.',
+        }),
+        JSON.stringify({
+          score: 70,
+          matched_skills: [],
+          missing_skills: [],
+          red_flags: ['NO_COMPANY'],
+          reasons: 'Missing company.',
+        }),
+      ]);
+      const scorer = new DefaultScorer(mockLLM);
+
+      await scorer.scoreJob(
+        {
+          title: 'Flutter Developer',
+          company: 'Unknown',
+          source_kind: 'alert_email',
+          description: 'Flutter Developer at Unknown',
+        },
+        mockProfile,
+      );
+
+      await scorer.scoreJob(
+        {
+          title: 'Flutter Developer',
+          company: 'Unknown',
+          source_kind: 'api',
+          description: 'Flutter Developer at Unknown',
+        },
+        mockProfile,
+      );
+
+      expect(mockLLM.calls[0]).not.toContain('code: NO_COMPANY');
+      expect(mockLLM.calls[0]).toContain('do NOT flag NO_COMPANY');
+      expect(mockLLM.calls[1]).toContain('code: NO_COMPANY');
+    });
   });
 
   describe('Step 4: Contact Discovery Chain', () => {
@@ -1367,6 +1411,69 @@ describe('Phase 4: Rule Filters, Skip Checks, Scorer, and Router', () => {
       expect(j?.['scorer_failed']).toBe(1);
       expect(stats.routed).toBe(1);
       expect(stats.scored).toBe(0);
+    });
+
+    it('clears large batches of rule-filtered jobs in a single pass without consuming LLM batch slots', async () => {
+      const { db, jobs } = createMockDb();
+
+      // Seed 60 TITLE_MISMATCH jobs followed by 2 matching jobs (> old 50-row limit)
+      for (let i = 0; i < 60; i++) {
+        jobs.set(`job-noise-${i}`, {
+          id: `job-noise-${i}`,
+          source: 'jobicy',
+          source_kind: 'api',
+          title: `Account Executive ${i}`,
+          company: `SalesCo ${i}`,
+          company_normalized: `salesco ${i}`,
+          location: 'Remote',
+          remote: 1,
+          description: 'B2B sales role.',
+          apply_url: `https://example.com/sales/${i}`,
+          status: 'new',
+          fetched_at: `2026-11-05T08:${String(i).padStart(2, '0')}:00Z`,
+        });
+      }
+
+      jobs.set('job-match-after-noise', {
+        id: 'job-match-after-noise',
+        source: 'greenhouse',
+        source_kind: 'ats',
+        title: 'Senior Systems Engineer',
+        company: 'CloudScale',
+        company_normalized: 'cloudscale',
+        location: 'Remote',
+        remote: 1,
+        salary_min: 160000,
+        salary_max: 200000,
+        description: 'TypeScript and distributed systems. Contact: jobs@cloudscale.com',
+        apply_url: 'https://cloudscale.com/jobs/1',
+        contact_email: 'jobs@cloudscale.com',
+        contact_source: 'posting',
+        status: 'new',
+        fetched_at: '2026-11-05T09:00:00Z',
+      });
+
+      const mockLLM = new MockLLMClient([
+        JSON.stringify({
+          score: 90,
+          matched_skills: ['TypeScript'],
+          missing_skills: [],
+          red_flags: [],
+          reasons: 'Strong fit.',
+        }),
+      ]);
+      const scorer = new DefaultScorer(mockLLM);
+
+      const stats = await processJobPipeline({
+        db,
+        profile: mockProfile,
+        scorer,
+      });
+
+      expect(stats.filtered_out).toBe(60);
+      expect(stats.scored).toBe(1);
+      expect(stats.routed).toBe(1);
+      expect(jobs.get('job-match-after-noise')?.['status']).toBe('routed');
     });
   });
 });

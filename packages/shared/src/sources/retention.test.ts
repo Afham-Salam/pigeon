@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { D1LikeDatabase } from '../state-machine.js';
-import { purgeExpiredJobDescriptions, PURGED_DESCRIPTION_PLACEHOLDER } from './retention.js';
+import {
+  purgeExpiredJobDescriptions,
+  purgeOldFilteredJobs,
+  PURGED_DESCRIPTION_PLACEHOLDER,
+} from './retention.js';
 
 class MockD1PreparedStatement {
   private query: string;
@@ -38,6 +42,7 @@ class MockD1Database {
     title: string;
     company: string;
     description: string;
+    status?: string;
     fetched_at: string;
     updated_at: string;
   }> = [];
@@ -86,13 +91,31 @@ class MockD1Database {
       return { meta: { changes } };
     }
 
+    if (query.includes('DELETE FROM jobs')) {
+      const cutoffIso = String(params[0]);
+      const appliedJobIds = new Set(this.applications.map((a) => a.job_id));
+      const before = this.jobs.length;
+      this.jobs = this.jobs.filter(
+        (j) =>
+          !(
+            j.status === 'filtered_out' &&
+            j.updated_at < cutoffIso &&
+            !appliedJobIds.has(j.id)
+          ),
+      );
+      return { meta: { changes: before - this.jobs.length } };
+    }
+
     if (query.includes('INSERT INTO events')) {
       const [id, payload, created_at] = params as [string, string, string];
+      const type = query.includes('retention_filtered_purged')
+        ? 'retention_filtered_purged'
+        : 'retention_purged';
       this.events.push({
         id,
         entity: 'retention',
         entity_id: 'jobs',
-        type: 'retention_purged',
+        type,
         payload,
         created_at,
       });
@@ -229,5 +252,49 @@ describe('Retention Policy: Job Description Purge', () => {
     expect(secondRun.purgedCount).toBe(0);
     // No new events added
     expect(db.events).toHaveLength(1);
+  });
+
+  it('deletes only filtered_out jobs older than cutoffDays and keeps routed/recent filtered jobs', async () => {
+    db.jobs.push(
+      {
+        id: 'job-filtered-old',
+        title: 'Sales Rep',
+        company: 'OldCo',
+        description: 'Sales',
+        status: 'filtered_out',
+        fetched_at: '2026-10-01T12:00:00.000Z',
+        updated_at: '2026-10-01T12:00:00.000Z',
+      },
+      {
+        id: 'job-filtered-recent',
+        title: 'Sales Rep 2',
+        company: 'NewCo',
+        description: 'Sales',
+        status: 'filtered_out',
+        fetched_at: '2026-11-01T12:00:00.000Z',
+        updated_at: '2026-11-01T12:00:00.000Z',
+      },
+      {
+        id: 'job-routed-old',
+        title: 'Flutter Dev',
+        company: 'KeepCo',
+        description: 'Flutter',
+        status: 'routed',
+        fetched_at: '2026-10-01T12:00:00.000Z',
+        updated_at: '2026-10-01T12:00:00.000Z',
+      },
+    );
+
+    const res = await purgeOldFilteredJobs({
+      db: db as unknown as D1LikeDatabase,
+      cutoffDays: 14,
+      now,
+    });
+
+    expect(res.deletedCount).toBe(1);
+    expect(db.jobs.find((j) => j.id === 'job-filtered-old')).toBeUndefined();
+    expect(db.jobs.find((j) => j.id === 'job-filtered-recent')).toBeDefined();
+    expect(db.jobs.find((j) => j.id === 'job-routed-old')).toBeDefined();
+    expect(db.events.some((e) => e.type === 'retention_filtered_purged')).toBe(true);
   });
 });

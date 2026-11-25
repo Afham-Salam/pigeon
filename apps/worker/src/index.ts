@@ -51,6 +51,7 @@ import {
   seedLocalData,
   logger,
   purgeExpiredJobDescriptions,
+  purgeOldFilteredJobs,
   getConfig,
   normalizeSpreadsheetId,
   setAppSetting,
@@ -3267,10 +3268,11 @@ app.post('/api/settings/import', async (c) => {
   return c.json({ ok: true, imported: importedCount });
 });
 
-// 12. POST /api/retention/purge: Manually triggers 90-day job retention purge
+// 12. POST /api/retention/purge: Manually triggers 90-day job retention purge and old filtered cleanup
 app.post('/api/retention/purge', async (c) => {
   const result = await purgeExpiredJobDescriptions({ db: c.env.DB });
-  return c.json({ ok: true, ...result });
+  const filteredResult = await purgeOldFilteredJobs({ db: c.env.DB });
+  return c.json({ ok: true, ...result, deletedFilteredCount: filteredResult.deletedCount });
 });
 
 // -------------------------------------------------------------
@@ -3601,8 +3603,9 @@ export default {
     }
     // Housekeeping: expire 30-day-old manual_pending items
     await expireStaleManualPending(env.DB);
-    // Housekeeping: purge >90-day job descriptions for unapplied jobs
+    // Housekeeping: purge >90-day job descriptions for unapplied jobs and >14-day filtered_out noise
     await purgeExpiredJobDescriptions({ db: env.DB });
+    await purgeOldFilteredJobs({ db: env.DB });
     const appConfig = await getConfig(env, env.DB);
     // Send daily digest & check failure rate alert
     const notifier = await createWorkerNotifier(env, appConfig);
@@ -3704,12 +3707,22 @@ export default {
             const maxScoredRaw = await env.CONFIG.get('MAX_SCORED_PER_DAY');
             const maxScoredPerDay = maxScoredRaw ? Number.parseInt(maxScoredRaw, 10) : 200;
 
-            await processJobPipeline({
+            const pipelineStats = await processJobPipeline({
               db: env.DB,
               profile,
               scorer,
               config: { max_scored_per_day: maxScoredPerDay },
             });
+
+            // Re-enqueue next batch if new jobs remain and daily cap wasn't hit
+            if (pipelineStats.deferred_daily_cap === 0 && pipelineStats.processed > 0) {
+              const moreNew = await env.DB.prepare(
+                `SELECT id FROM jobs WHERE status = 'new' LIMIT 1`,
+              ).first<{ id: string }>();
+              if (moreNew) {
+                await env.JOBS_QUEUE.send({ action: 'score_and_route' });
+              }
+            }
 
             // Enqueue application creation for all newly routed jobs that lack an application row
             const pendingJobs = await env.DB.prepare(
