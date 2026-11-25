@@ -399,4 +399,72 @@ describe('Worker Google OAuth & Gmail Sending API', () => {
     expect(contactRow?.company_normalized).toBe('stripe');
     expect(contactRow?.last_channel).toBe('email');
   });
+
+  it('approving and bulk-approving email applications enqueues send_application messages', async () => {
+    const nowIso = new Date().toISOString();
+
+    await workerEnv.DB.prepare(
+      `INSERT OR REPLACE INTO jobs (id, dedupe_key, source, source_kind, title, company, company_normalized, description, contact_email, contact_source, status, apply_route, match_score, untrusted, updated_at, fetched_at)
+       VALUES ('job-q-approve-1', 'd-q-approve-1', 'ats', 'ats', 'Senior Systems Engineer', 'Stripe', 'stripe', 'Desc', 'jobs@stripe.com', 'posting', 'routed', 'auto_email', 90, 0, ?, ?)`,
+    )
+      .bind(nowIso, nowIso)
+      .run();
+
+    await workerEnv.DB.prepare(
+      `INSERT OR REPLACE INTO applications (id, job_id, kind, channel, cover_letter, subject, resume_id, status, updated_at)
+       VALUES ('app-q-approve-1', 'job-q-approve-1', 'initial', 'email', ?, 'Application for Senior Systems Engineer', 'res-gw-1', 'draft', ?)`,
+    )
+      .bind(validCoverLetter, nowIso)
+      .run();
+
+    const enqueuedSingle: unknown[] = [];
+    const singleEnv: Bindings = {
+      ...workerEnv,
+      JOBS_QUEUE: {
+        async send(msg: unknown) {
+          enqueuedSingle.push(msg);
+        },
+      } as unknown as Queue,
+    };
+
+    const approveRes = await app.fetch(
+      new Request('http://localhost/api/applications/app-q-approve-1/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:5173' },
+        body: JSON.stringify({}),
+      }),
+      singleEnv,
+    );
+    expect(approveRes.status).toBe(200);
+    expect(enqueuedSingle).toContainEqual({
+      action: 'send_application',
+      applicationId: 'app-q-approve-1',
+    });
+
+    // Reset back to draft and test bulk-approve enqueue
+    await workerEnv.DB.prepare(`UPDATE applications SET status = 'draft' WHERE id = 'app-q-approve-1'`).run();
+    const enqueuedBulk: unknown[] = [];
+    const bulkEnv: Bindings = {
+      ...workerEnv,
+      JOBS_QUEUE: {
+        async send(msg: unknown) {
+          enqueuedBulk.push(msg);
+        },
+      } as unknown as Queue,
+    };
+
+    const bulkRes = await app.fetch(
+      new Request('http://localhost/api/applications/bulk-approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'http://localhost:5173' },
+        body: JSON.stringify({ ids: ['app-q-approve-1'] }),
+      }),
+      bulkEnv,
+    );
+    expect(bulkRes.status).toBe(200);
+    expect(enqueuedBulk).toContainEqual({
+      action: 'send_application',
+      applicationId: 'app-q-approve-1',
+    });
+  });
 });

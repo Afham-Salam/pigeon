@@ -1312,6 +1312,7 @@ app.post('/api/manual/:id/send-by-email', async (c) => {
     applicationId: id,
     confirmRisk: body.confirm_risk,
   });
+  await enqueueSendApplications(c.env.JOBS_QUEUE, [id]);
   return c.json({ ok: true, ...result });
 });
 
@@ -1582,6 +1583,14 @@ app.post('/api/applications/:id/approve', async (c) => {
   });
 
   try {
+    const approvedRow = await c.env.DB.prepare(
+      `SELECT channel, status FROM applications WHERE id = ?`,
+    )
+      .bind(id)
+      .first<{ channel: string; status: string }>();
+    if (approvedRow?.status === 'approved' && approvedRow?.channel === 'email') {
+      await enqueueSendApplications(c.env.JOBS_QUEUE, [id]);
+    }
     await c.env.JOBS_QUEUE.send({ action: 'sync_sheet' });
   } catch {
     // Non-fatal
@@ -1614,6 +1623,7 @@ app.post('/api/applications/bulk-approve', async (c) => {
   });
 
   try {
+    await enqueueSendApplications(c.env.JOBS_QUEUE, result.approved);
     await c.env.JOBS_QUEUE.send({ action: 'sync_sheet' });
   } catch {
     // Non-fatal
@@ -3529,19 +3539,47 @@ async function executeIngestCron(env: Bindings): Promise<{
   };
 }
 
+async function enqueueSendApplications(
+  queue: Queue | undefined,
+  applicationIds: string[],
+): Promise<number> {
+  if (!queue || applicationIds.length === 0) return 0;
+  let enqueued = 0;
+  for (const applicationId of applicationIds) {
+    try {
+      await queue.send({ action: 'send_application', applicationId });
+      enqueued++;
+    } catch (err) {
+      logger.error(`Error enqueuing send_application for ${applicationId}`, err);
+    }
+  }
+  return enqueued;
+}
+
 async function executeScoreCron(env: Bindings): Promise<{
   enqueuedActions: string[];
   hasGoogleOAuth: boolean;
+  approvedEnqueued: number;
 }> {
   await env.JOBS_QUEUE.send({ action: 'score_and_route' });
   const enqueuedActions = ['score_and_route'];
   const appConfig = await getConfig(env, env.DB);
   const hasGoogleOAuth = appConfig.hasGoogleOAuth();
+  let approvedEnqueued = 0;
   if (hasGoogleOAuth) {
     await env.JOBS_QUEUE.send({ action: 'sync_sheet' });
     enqueuedActions.push('sync_sheet');
+
+    const approvedRows = await env.DB.prepare(
+      `SELECT id FROM applications
+       WHERE status = 'approved' AND channel = 'email'
+       ORDER BY updated_at ASC
+       LIMIT 20`,
+    ).all<{ id: string }>();
+    const ids = (approvedRows.results || []).map((r) => r.id);
+    approvedEnqueued = await enqueueSendApplications(env.JOBS_QUEUE, ids);
   }
-  return { enqueuedActions, hasGoogleOAuth };
+  return { enqueuedActions, hasGoogleOAuth, approvedEnqueued };
 }
 
 async function executeInboxCron(env: Bindings): Promise<{
