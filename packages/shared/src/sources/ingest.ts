@@ -129,23 +129,43 @@ export async function ingestSource(
     throw error;
   }
 
-  // 3. Normalize & ingest
+  // 3. Normalize & ingest (pre-load existing apply_urls for this source to skip heavy HTML/regex normalization on known duplicates)
+  const existingApplyUrls = new Set<string>();
+  try {
+    const existingRows = await options.db
+      .prepare(`SELECT apply_url FROM jobs WHERE source = ? AND apply_url IS NOT NULL`)
+      .bind(sourceName)
+      .all<{ apply_url: string }>();
+    for (const row of existingRows?.results ?? []) {
+      if (row.apply_url) existingApplyUrls.add(row.apply_url);
+    }
+  } catch {
+    // Fallback to per-row dedupe_key check when DB mock does not support .all()
+  }
+
   let newJobs = 0;
   let duplicates = 0;
   let failed = 0;
 
   for (const raw of rawJobs) {
     try {
-      const normalized = adapter.normalize(raw);
-
-      // Extract contact email from description if not yet found
-      if (!normalized.contact_email) {
-        const email = extractContactEmail(normalized.description);
-        if (email) {
-          normalized.contact_email = email;
-          normalized.contact_source = 'posting';
+      if (existingApplyUrls.size > 0) {
+        const rawUrl =
+          raw['absolute_url'] ||
+          raw['url'] ||
+          raw['link'] ||
+          raw['hostedUrl'] ||
+          raw['jobUrl'] ||
+          raw['redirect_url'] ||
+          raw['careers_url'] ||
+          raw['applicationLink'];
+        if (typeof rawUrl === 'string' && rawUrl && existingApplyUrls.has(rawUrl)) {
+          duplicates++;
+          continue;
         }
       }
+
+      const normalized = adapter.normalize(raw);
 
       // Compute dedupe_key = SHA256(company_normalized + normalized title + location bucket)
       const dedupeKey = await computeDedupeKey(
@@ -165,6 +185,15 @@ export async function ingestSource(
       if (existing) {
         duplicates++;
         continue;
+      }
+
+      // Extract contact email from description if not yet found (after dedupe to avoid redundant regex work)
+      if (!normalized.contact_email) {
+        const email = extractContactEmail(normalized.description);
+        if (email) {
+          normalized.contact_email = email;
+          normalized.contact_source = 'posting';
+        }
       }
 
       const jobId = crypto.randomUUID();

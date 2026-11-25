@@ -351,6 +351,9 @@ describe('Worker Scoring & Routing Pipeline Integration', () => {
     expect(enqueued.some((m) => (m as { action?: string })?.action === 'score_and_route')).toBe(
       true,
     );
+    expect(enqueued.some((m) => typeof (m as { source?: string })?.source === 'string')).toBe(
+      false,
+    );
   });
 
   it('re-queues skipped/filtered jobs and updates ATS slugs via API', async () => {

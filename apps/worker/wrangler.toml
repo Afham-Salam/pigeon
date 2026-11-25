@@ -31,7 +31,7 @@ queue = "pigeon-jobs"
 
 [[queues.consumers]]
 queue = "pigeon-jobs"
-max_batch_size = 10
+max_batch_size = 1
 max_batch_timeout = 5
 
 [env.dev]
@@ -56,7 +56,7 @@ queue = "pigeon-jobs"
 
 [[env.dev.queues.consumers]]
 queue = "pigeon-jobs"
-max_batch_size = 10
+max_batch_size = 1
 max_batch_timeout = 5
 
 [env.staging]
@@ -81,7 +81,7 @@ queue = "pigeon-jobs-staging"
 
 [[env.staging.queues.consumers]]
 queue = "pigeon-jobs-staging"
-max_batch_size = 10
+max_batch_size = 1
 max_batch_timeout = 5
 
 [env.prod]
@@ -106,5 +106,5 @@ queue = "pigeon-jobs-prod"
 
 [[env.prod.queues.consumers]]
 queue = "pigeon-jobs-prod"
-max_batch_size = 10
+max_batch_size = 1
 max_batch_timeout = 5

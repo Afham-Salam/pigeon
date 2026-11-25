@@ -2568,10 +2568,7 @@ app.put('/api/sources/slugs', async (c) => {
 
 // POST /api/sources/sync: Triggers immediate ingestion across all enabled sources
 app.post('/api/sources/sync', async (c) => {
-  const enabledSources = await getEnabledSources(c.env.CONFIG);
-  for (const source of enabledSources) {
-    await c.env.JOBS_QUEUE.send({ source });
-  }
+  const enabledSources = await enqueueSourcesForIngestion(c.env);
 
   try {
     const raw = await c.env.CONFIG.get('cron:last_runs');
@@ -3461,6 +3458,47 @@ async function recordCronExecution(
   }
 }
 
+const ATS_SLUG_SOURCES = new Set([
+  'greenhouse',
+  'lever',
+  'ashby',
+  'smartrecruiters',
+  'workable',
+  'breezy',
+  'bamboohr',
+  'recruitee',
+]);
+
+const ATS_SLUGS_PER_QUEUE_MESSAGE = 3;
+
+async function enqueueSourcesForIngestion(env: Bindings): Promise<string[]> {
+  const enabledSources = await getEnabledSources(env.CONFIG);
+  for (const source of enabledSources) {
+    if (ATS_SLUG_SOURCES.has(source)) {
+      const rawSlugs = await env.CONFIG.get(`sources:${source}:slugs`);
+      if (rawSlugs) {
+        try {
+          const parsed = JSON.parse(rawSlugs);
+          if (Array.isArray(parsed) && parsed.length > ATS_SLUGS_PER_QUEUE_MESSAGE) {
+            const slugs = parsed.map(String).filter(Boolean);
+            for (let i = 0; i < slugs.length; i += ATS_SLUGS_PER_QUEUE_MESSAGE) {
+              await env.JOBS_QUEUE.send({
+                source,
+                slugs: slugs.slice(i, i + ATS_SLUGS_PER_QUEUE_MESSAGE),
+              });
+            }
+            continue;
+          }
+        } catch {
+          // Fall back to single source message
+        }
+      }
+    }
+    await env.JOBS_QUEUE.send({ source });
+  }
+  return enabledSources;
+}
+
 async function executeIngestCron(env: Bindings): Promise<{
   enabledSources: string[];
   expiredManualCount: number;
@@ -3469,10 +3507,7 @@ async function executeIngestCron(env: Bindings): Promise<{
   appConfig: AppConfig;
   notifier: Notifier;
 }> {
-  const enabledSources = await getEnabledSources(env.CONFIG);
-  for (const source of enabledSources) {
-    await env.JOBS_QUEUE.send({ source });
-  }
+  const enabledSources = await enqueueSourcesForIngestion(env);
   // Housekeeping: expire 30-day-old manual_pending items
   const expiredManual = await expireStaleManualPending(env.DB);
   // Housekeeping: purge >90-day job descriptions for unapplied jobs and >14-day filtered_out noise
@@ -3492,6 +3527,60 @@ async function executeIngestCron(env: Bindings): Promise<{
     appConfig,
     notifier,
   };
+}
+
+async function executeScoreCron(env: Bindings): Promise<{
+  enqueuedActions: string[];
+  hasGoogleOAuth: boolean;
+}> {
+  await env.JOBS_QUEUE.send({ action: 'score_and_route' });
+  const enqueuedActions = ['score_and_route'];
+  const appConfig = await getConfig(env, env.DB);
+  const hasGoogleOAuth = appConfig.hasGoogleOAuth();
+  if (hasGoogleOAuth) {
+    await env.JOBS_QUEUE.send({ action: 'sync_sheet' });
+    enqueuedActions.push('sync_sheet');
+  }
+  return { enqueuedActions, hasGoogleOAuth };
+}
+
+async function executeInboxCron(env: Bindings): Promise<{
+  hasGoogleOAuth: boolean;
+  enqueuedActions: string[];
+  authHealthStatus: string | null;
+}> {
+  const appConfig = await getConfig(env, env.DB);
+  const hasGoogleOAuth = appConfig.hasGoogleOAuth();
+  const enqueuedActions: string[] = [];
+  let authHealthStatus: string | null = null;
+
+  if (hasGoogleOAuth) {
+    await env.JOBS_QUEUE.send({ action: 'poll_inbox' });
+    await env.JOBS_QUEUE.send({ action: 'sync_gmail_alerts' });
+    enqueuedActions.push('poll_inbox', 'sync_gmail_alerts');
+
+    try {
+      const notifier = await createWorkerNotifier(env, appConfig);
+      const googleOAuth = appConfig.getGoogleOAuth();
+      const tokenEncryptionKey = getTokenKey(env);
+      const secrets: GoogleOAuthSecrets = {
+        clientId: googleOAuth.clientId as string,
+        clientSecret: googleOAuth.clientSecret as string,
+        tokenEncryptionKey,
+      };
+      const health = await pingGoogleAuthHealth({
+        config: env.CONFIG,
+        secrets,
+        notifier,
+      });
+      authHealthStatus = health.status;
+    } catch (err) {
+      logger.error('Error during Google auth health ping', err);
+      authHealthStatus = 'error';
+    }
+  }
+
+  return { hasGoogleOAuth, enqueuedActions, authHealthStatus };
 }
 
 const CRON_KEY_BY_ID: Record<string, string> = {
@@ -3530,74 +3619,37 @@ app.post('/api/cron/:id/run', async (c) => {
   }
 
   if (id === 'score') {
-    await c.env.JOBS_QUEUE.send({ action: 'score_and_route' });
-    const enqueuedActions = ['score_and_route'];
-    const appConfig = await getConfig(c.env, c.env.DB);
-    const hasGoogleOAuth = appConfig.hasGoogleOAuth();
-    if (hasGoogleOAuth) {
-      await c.env.JOBS_QUEUE.send({ action: 'sync_sheet' });
-      enqueuedActions.push('sync_sheet');
-    }
+    const result = await executeScoreCron(c.env);
     await recordCronExecution(c.env.CONFIG, c.env.DB, cronKey, nowIso, 'manual');
     return c.json({
       ok: true,
       id,
       cron: cronKey,
       lastRunAt: nowIso,
-      message: hasGoogleOAuth
+      message: result.hasGoogleOAuth
         ? 'Enqueued job scoring pipeline and Google Sheet sync.'
         : 'Enqueued job scoring pipeline (Google Sheet sync skipped: OAuth not configured).',
       details: {
-        enqueuedActions,
+        enqueuedActions: result.enqueuedActions,
       },
     });
   }
 
   // id === 'inbox'
-  const appConfig = await getConfig(c.env, c.env.DB);
-  const hasGoogleOAuth = appConfig.hasGoogleOAuth();
-  const enqueuedActions: string[] = [];
-  let authHealthStatus: string | null = null;
-
-  if (hasGoogleOAuth) {
-    await c.env.JOBS_QUEUE.send({ action: 'poll_inbox' });
-    await c.env.JOBS_QUEUE.send({ action: 'sync_gmail_alerts' });
-    enqueuedActions.push('poll_inbox', 'sync_gmail_alerts');
-
-    try {
-      const notifier = await createWorkerNotifier(c.env, appConfig);
-      const googleOAuth = appConfig.getGoogleOAuth();
-      const tokenEncryptionKey = getTokenKey(c.env);
-      const secrets: GoogleOAuthSecrets = {
-        clientId: googleOAuth.clientId as string,
-        clientSecret: googleOAuth.clientSecret as string,
-        tokenEncryptionKey,
-      };
-      const health = await pingGoogleAuthHealth({
-        config: c.env.CONFIG,
-        secrets,
-        notifier,
-      });
-      authHealthStatus = health.status;
-    } catch (err) {
-      logger.error('Error during manual Google auth health ping', err);
-      authHealthStatus = 'error';
-    }
-  }
-
+  const result = await executeInboxCron(c.env);
   await recordCronExecution(c.env.CONFIG, c.env.DB, cronKey, nowIso, 'manual');
   return c.json({
     ok: true,
     id,
     cron: cronKey,
     lastRunAt: nowIso,
-    message: hasGoogleOAuth
-      ? `Enqueued inbox poll & Gmail alerts sync; Google auth health: ${authHealthStatus ?? 'checked'}.`
+    message: result.hasGoogleOAuth
+      ? `Enqueued inbox poll & Gmail alerts sync; Google auth health: ${result.authHealthStatus ?? 'checked'}.`
       : 'Google OAuth not configured; skipped Gmail inbox poll and auth check.',
     details: {
-      googleOAuthConfigured: hasGoogleOAuth,
-      enqueuedActions,
-      authHealthStatus,
+      googleOAuthConfigured: result.hasGoogleOAuth,
+      enqueuedActions: result.enqueuedActions,
+      authHealthStatus: result.authHealthStatus,
     },
   });
 });
@@ -3906,62 +3958,31 @@ export default {
 
     await recordCronExecution(env.CONFIG, env.DB, cronKey, nowIso);
 
-    const { appConfig, notifier } = await executeIngestCron(env);
-
-    // Score and route pending jobs on the 10-minute cron trigger (*/10 * * * *)
-    if (_event.cron === '*/10 * * * *') {
+    if (cronKey === '*/10 * * * *') {
       try {
-        await env.JOBS_QUEUE.send({ action: 'score_and_route' });
+        await executeScoreCron(env);
       } catch (err) {
-        logger.error('Error enqueuing scheduled score_and_route', err);
+        logger.error('Error during */10 * * * * scheduled score cron', err);
       }
+      return;
     }
 
-    const hasGoogleOAuth = appConfig.hasGoogleOAuth();
-
-    // Sync to Google Sheet every cron run (10 min) if OAuth configured
-    if (hasGoogleOAuth) {
+    if (cronKey === '*/15 * * * *') {
       try {
-        await env.JOBS_QUEUE.send({ action: 'sync_sheet' });
+        await executeInboxCron(env);
       } catch (err) {
-        logger.error('Error enqueuing scheduled sheet sync', err);
+        logger.error('Error during */15 * * * * scheduled inbox cron', err);
       }
+      return;
     }
 
-    // Poll Gmail inbox every cron run (15 min) if OAuth configured
-    if (hasGoogleOAuth) {
-      try {
-        await env.JOBS_QUEUE.send({ action: 'poll_inbox' });
-        await env.JOBS_QUEUE.send({ action: 'sync_gmail_alerts' });
-      } catch (err) {
-        logger.error('Error enqueuing scheduled inbox poll', err);
-      }
-    }
-
-    // Daily Google Auth health ping if credentials configured
-    if (hasGoogleOAuth) {
-      try {
-        const googleOAuth = appConfig.getGoogleOAuth();
-        const tokenEncryptionKey = getTokenKey(env);
-        const secrets: GoogleOAuthSecrets = {
-          clientId: googleOAuth.clientId as string,
-          clientSecret: googleOAuth.clientSecret as string,
-          tokenEncryptionKey,
-        };
-        await pingGoogleAuthHealth({
-          config: env.CONFIG,
-          secrets,
-          notifier,
-        });
-      } catch (err) {
-        logger.error('Error during scheduled Google auth health ping', err);
-      }
-    }
+    // Default / 3-hour cron ('0 */3 * * *'): ingestion + housekeeping
+    await executeIngestCron(env);
   },
   async queue(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
     const appConfig = await getConfig(env, env.DB);
     for (const msg of batch.messages) {
-      const body = msg.body as { source?: string; action?: string };
+      const body = msg.body as { source?: string; slugs?: string[]; action?: string };
       if (body && typeof body.source === 'string') {
         try {
           const identity = appConfig.getIdentityConfig();
@@ -3976,6 +3997,7 @@ export default {
               ADZUNA_APP_KEY: appConfig.getRawValue('ADZUNA_APP_KEY'),
             },
             userAgent,
+            slugs: Array.isArray(body.slugs) ? body.slugs : undefined,
           });
           if (ingestRes && ingestRes.newJobs > 0) {
             await env.JOBS_QUEUE.send({ action: 'score_and_route' });
@@ -4008,6 +4030,8 @@ export default {
               profile,
               scorer,
               config: { max_scored_per_day: maxScoredPerDay },
+              limit: 5,
+              filterLimit: 100,
             });
 
             // Re-enqueue next batch if new jobs remain and daily cap wasn't hit
@@ -4020,13 +4044,13 @@ export default {
               }
             }
 
-            // Enqueue application creation for all newly routed jobs that lack an application row
+            // Enqueue application creation for newly routed jobs that lack an application row
             const pendingJobs = await env.DB.prepare(
               `SELECT j.id FROM jobs j
                LEFT JOIN applications a ON a.job_id = j.id
                WHERE j.status = 'routed' AND a.id IS NULL
                ORDER BY j.match_score DESC
-               LIMIT 50`,
+               LIMIT 20`,
             ).all<{ id: string }>();
 
             for (const rj of pendingJobs.results || []) {

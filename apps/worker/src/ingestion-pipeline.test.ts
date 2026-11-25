@@ -436,4 +436,94 @@ describe('Ingestion Pipeline & Queue Consumer Tests', () => {
       { source: 'weworkremotely' },
     ]);
   });
+
+  it('Cron Trigger shards multi-slug ATS sources into chunks of 3 and skips normalize on known duplicate apply_urls', async () => {
+    await workerEnv.CONFIG.put('sources:enabled', JSON.stringify(['greenhouse']));
+    await workerEnv.CONFIG.put(
+      'sources:greenhouse:slugs',
+      JSON.stringify(['s1', 's2', 's3', 's4', 's5']),
+    );
+
+    const enqueuedMessages: unknown[] = [];
+    const mockQueue = {
+      async send(message: unknown) {
+        enqueuedMessages.push(message);
+      },
+    } as unknown as Queue;
+
+    await worker.scheduled(
+      {
+        cron: '0 */3 * * *',
+        scheduledTime: Date.now(),
+        noRetry() {},
+      } as unknown as ScheduledEvent,
+      { ...workerEnv, JOBS_QUEUE: mockQueue },
+    );
+
+    expect(enqueuedMessages).toEqual([
+      { source: 'greenhouse', slugs: ['s1', 's2', 's3'] },
+      { source: 'greenhouse', slugs: ['s4', 's5'] },
+    ]);
+
+    // Verify fast-path duplicate skip avoids calling normalize() for already-ingested apply_urls
+    let normalizeCalls = 0;
+    const origRemoteOk = ALL_SOURCES['remoteok'];
+    try {
+      ALL_SOURCES['remoteok'] = {
+        name: 'remoteok',
+        kind: 'api',
+        async fetch() {
+          return [
+            {
+              id: 'fast-dup-1',
+              position: 'Platform Engineer',
+              company: 'FastCo',
+              url: 'https://remoteok.com/fast-dup-1',
+              description: '<p>Great role</p>',
+            },
+          ];
+        },
+        normalize(raw): NormalizedJob {
+          normalizeCalls++;
+          return {
+            source: 'remoteok',
+            source_kind: 'api',
+            source_job_id: String(raw['id']),
+            title: String(raw['position']),
+            company: String(raw['company']),
+            company_normalized: 'fastco',
+            location: 'Remote',
+            remote: true,
+            salary_min: null,
+            salary_max: null,
+            currency: null,
+            salary_raw: null,
+            description: 'Great role',
+            apply_url: String(raw['url']),
+            contact_email: null,
+            contact_source: 'none',
+            posted_at: null,
+            untrusted: true,
+          };
+        },
+      };
+
+      const firstRun = await ingestSource('remoteok', {
+        db: workerEnv.DB,
+        kv: workerEnv.CONFIG,
+      });
+      expect(firstRun.newJobs).toBe(1);
+      expect(normalizeCalls).toBe(1);
+
+      const secondRun = await ingestSource('remoteok', {
+        db: workerEnv.DB,
+        kv: workerEnv.CONFIG,
+      });
+      expect(secondRun.newJobs).toBe(0);
+      expect(secondRun.duplicates).toBe(1);
+      expect(normalizeCalls).toBe(1);
+    } finally {
+      if (origRemoteOk) ALL_SOURCES['remoteok'] = origRemoteOk;
+    }
+  });
 });
