@@ -53,6 +53,7 @@ export interface JobSourceConfig {
   fetchFn?: typeof fetch | undefined;
   delayFn?: ((ms: number) => Promise<void>) | undefined;
   slugs?: string[] | undefined;
+  keywords?: string | undefined;
   onSlugStats?: ((stats: SlugStats) => void) | undefined;
   [key: string]: unknown;
 }

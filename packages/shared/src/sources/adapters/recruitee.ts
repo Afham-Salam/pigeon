@@ -15,7 +15,7 @@ export const recruiteeAdapter: JobSource = {
     const userAgent =
       config?.userAgent || 'Pigeon/1.0 (Job Application Assistant; +https://github.com/pigeon)';
 
-    const slugs = await getAtsSlugs('recruitee', config, ['acme']);
+    const slugs = await getAtsSlugs('recruitee', config, []);
     const allJobs: RawJob[] = [];
     const failedSlugs: string[] = [];
 

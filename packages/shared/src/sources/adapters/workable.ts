@@ -15,7 +15,7 @@ export const workableAdapter: JobSource = {
     const userAgent =
       config?.userAgent || 'Pigeon/1.0 (Job Application Assistant; +https://github.com/pigeon)';
 
-    const slugs = await getAtsSlugs('workable', config, ['superops']);
+    const slugs = await getAtsSlugs('workable', config, []);
     const allJobs: RawJob[] = [];
     const failedSlugs: string[] = [];
 

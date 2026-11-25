@@ -15,7 +15,7 @@ export const bambooHrAdapter: JobSource = {
     const userAgent =
       config?.userAgent || 'Pigeon/1.0 (Job Application Assistant; +https://github.com/pigeon)';
 
-    const slugs = await getAtsSlugs('bamboohr', config, ['acme']);
+    const slugs = await getAtsSlugs('bamboohr', config, []);
     const allJobs: RawJob[] = [];
     const failedSlugs: string[] = [];
 

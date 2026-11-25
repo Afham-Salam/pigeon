@@ -21,9 +21,12 @@ export const adzunaAdapter: JobSource = {
     const userAgent =
       config?.userAgent || 'Pigeon/1.0 (Job Application Assistant; +https://github.com/pigeon)';
 
+    const query =
+      config?.keywords?.trim() || (await config?.kv?.get('sources:adzuna:query'))?.trim() || '';
+    const whatParam = query ? `&what=${encodeURIComponent(query)}` : '';
     const url = `https://api.adzuna.com/v1/api/jobs/in/search/1?app_id=${encodeURIComponent(
       appId,
-    )}&app_key=${encodeURIComponent(appKey)}&results_per_page=50&content-type=application/json`;
+    )}&app_key=${encodeURIComponent(appKey)}&results_per_page=50&content-type=application/json${whatParam}`;
 
     const res = await fetchWithRetry(
       url,

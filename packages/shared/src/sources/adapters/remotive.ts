@@ -14,8 +14,11 @@ export const remotiveAdapter: JobSource = {
     const userAgent =
       config?.userAgent || 'Pigeon/1.0 (Job Application Assistant; +https://github.com/pigeon)';
 
+    const query =
+      config?.keywords?.trim() || (await config?.kv?.get('sources:remotive:query'))?.trim() || '';
+    const searchParam = query ? `?search=${encodeURIComponent(query)}` : '';
     const res = await fetchWithRetry(
-      'https://remotive.com/api/remote-jobs',
+      `https://remotive.com/api/remote-jobs${searchParam}`,
       {
         headers: {
           'User-Agent': userAgent,

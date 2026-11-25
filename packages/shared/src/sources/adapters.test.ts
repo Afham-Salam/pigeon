@@ -1353,4 +1353,52 @@ describe('Job Source Adapters - Fixture Normalization', () => {
     expect(normalized.contact_email).toBe('jobs@nomadglobal.com');
     expect(normalized.apply_url).toBe('https://www.workingnomads.com/jobs/777');
   });
+
+  it('unconfigured ATS adapters return empty list without calling fake placeholder domains', async () => {
+    const fetchSpy = vi.fn();
+
+    for (const adapter of [bambooHrAdapter, recruiteeAdapter, breezyAdapter, workableAdapter]) {
+      const jobs = await adapter.fetch({ fetchFn: fetchSpy });
+      expect(jobs).toHaveLength(0);
+      expect((jobs as { slugStats?: unknown }).slugStats).toEqual({
+        total: 0,
+        failed: 0,
+        failedSlugs: [],
+      });
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('Adzuna and Remotive append keyword search params when configured via keywords or KV', async () => {
+    const adzunaFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(adzunaFixture), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await adzunaAdapter.fetch({
+      secrets: { ADZUNA_APP_ID: 'id', ADZUNA_APP_KEY: 'key' },
+      keywords: 'flutter mobile',
+      fetchFn: adzunaFetch,
+    });
+    expect(String(adzunaFetch.mock.calls[0]?.[0])).toContain('&what=flutter%20mobile');
+
+    const remotiveFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ jobs: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await remotiveAdapter.fetch({
+      kv: {
+        get: async (key: string) => (key === 'sources:remotive:query' ? 'flutter' : null),
+        put: async () => {},
+      },
+      fetchFn: remotiveFetch,
+    });
+    expect(String(remotiveFetch.mock.calls[0]?.[0])).toBe(
+      'https://remotive.com/api/remote-jobs?search=flutter',
+    );
+  });
 });
