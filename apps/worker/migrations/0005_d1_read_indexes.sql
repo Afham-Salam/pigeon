@@ -9,5 +9,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_apply_route ON jobs (apply_route);
 CREATE INDEX IF NOT EXISTS idx_applications_job_id ON applications (job_id);
 CREATE INDEX IF NOT EXISTS idx_applications_status_channel ON applications (status, channel);
 CREATE INDEX IF NOT EXISTS idx_applications_synced_at ON applications (synced_at);
+CREATE INDEX IF NOT EXISTS idx_applications_updated_at ON applications (updated_at);
+CREATE INDEX IF NOT EXISTS idx_applications_sent_at ON applications (sent_at);
 
 CREATE INDEX IF NOT EXISTS idx_events_type_created_at ON events (type, created_at);

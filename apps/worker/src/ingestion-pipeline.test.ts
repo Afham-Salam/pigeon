@@ -608,6 +608,7 @@ describe('Ingestion Pipeline & Queue Consumer Tests', () => {
       );
 
       expect(enqueued.filter((m) => (m as { action?: string }).action === 'score_and_route')).toHaveLength(1);
+      expect(await workerEnv.CONFIG.get('db:read_indexes_v1')).toBe('true');
     } finally {
       if (origRemoteOk) ALL_SOURCES['remoteok'] = origRemoteOk;
       if (origRemotive) ALL_SOURCES['remotive'] = origRemotive;

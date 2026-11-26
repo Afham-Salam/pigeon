@@ -4025,9 +4025,52 @@ app.post('/api/dev/feed-eml', async (c) => {
   return c.json({ ok: true, ...result });
 });
 
+const D1_READ_INDEXES_KV_KEY = 'db:read_indexes_v1';
+const D1_READ_INDEX_STATEMENTS = [
+  'CREATE INDEX IF NOT EXISTS idx_jobs_source_apply_url ON jobs (source, apply_url)',
+  'CREATE INDEX IF NOT EXISTS idx_jobs_status_fetched_at ON jobs (status, fetched_at)',
+  'CREATE INDEX IF NOT EXISTS idx_jobs_status_match_score ON jobs (status, match_score)',
+  'CREATE INDEX IF NOT EXISTS idx_jobs_status_updated_at ON jobs (status, updated_at)',
+  'CREATE INDEX IF NOT EXISTS idx_jobs_fetched_at ON jobs (fetched_at)',
+  'CREATE INDEX IF NOT EXISTS idx_jobs_apply_route ON jobs (apply_route)',
+  'CREATE INDEX IF NOT EXISTS idx_applications_job_id ON applications (job_id)',
+  'CREATE INDEX IF NOT EXISTS idx_applications_status_channel ON applications (status, channel)',
+  'CREATE INDEX IF NOT EXISTS idx_applications_synced_at ON applications (synced_at)',
+  'CREATE INDEX IF NOT EXISTS idx_applications_updated_at ON applications (updated_at)',
+  'CREATE INDEX IF NOT EXISTS idx_applications_sent_at ON applications (sent_at)',
+  'CREATE INDEX IF NOT EXISTS idx_events_type_created_at ON events (type, created_at)',
+];
+
+let d1ReadIndexesBootstrapped = false;
+
+async function ensureD1ReadIndexes(env: Bindings): Promise<void> {
+  if (d1ReadIndexesBootstrapped) return;
+  try {
+    const alreadyDone = await env.CONFIG.get(D1_READ_INDEXES_KV_KEY);
+    if (alreadyDone === 'true') {
+      d1ReadIndexesBootstrapped = true;
+      return;
+    }
+    const hasJobsTable = await env.DB.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'jobs'`,
+    ).first<{ name: string }>();
+    if (!hasJobsTable) {
+      return;
+    }
+    await env.DB.batch(D1_READ_INDEX_STATEMENTS.map((sql) => env.DB.prepare(sql)));
+    await env.CONFIG.put(D1_READ_INDEXES_KV_KEY, 'true');
+    d1ReadIndexesBootstrapped = true;
+  } catch (err) {
+    logger.warn('Failed to auto-create D1 read indexes; will retry later', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export default {
   fetch: app.fetch,
   async scheduled(_event: ScheduledEvent, env: Bindings): Promise<void> {
+    await ensureD1ReadIndexes(env);
     const nowIso = new Date().toISOString();
     const cronKey = _event?.cron || '0 */3 * * *';
 
@@ -4055,6 +4098,7 @@ export default {
     await executeIngestCron(env);
   },
   async queue(batch: MessageBatch<unknown>, env: Bindings): Promise<void> {
+    await ensureD1ReadIndexes(env);
     const appConfig = await getConfig(env, env.DB);
     for (const msg of batch.messages) {
       const body = msg.body as { source?: string; slugs?: string[]; action?: string };
@@ -4106,7 +4150,7 @@ export default {
               scorer,
               config: { max_scored_per_day: maxScoredPerDay },
               limit: 5,
-              filterLimit: 100,
+              filterLimit: 200,
             });
 
             // Re-enqueue next batch if new jobs remain and neither daily cap nor rate limit was hit
