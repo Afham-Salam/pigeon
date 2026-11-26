@@ -76,6 +76,19 @@ export interface IngestResult {
   failed_boards?: string[] | undefined;
 }
 
+function extractRawApplyUrl(raw: Record<string, unknown>): string | null {
+  const candidate =
+    raw['absolute_url'] ||
+    raw['url'] ||
+    raw['link'] ||
+    raw['hostedUrl'] ||
+    raw['jobUrl'] ||
+    raw['redirect_url'] ||
+    raw['careers_url'] ||
+    raw['applicationLink'];
+  return typeof candidate === 'string' && candidate.length > 0 ? candidate : null;
+}
+
 /**
  * Executes the ingestion pipeline for a given job source:
  * 1. Verifies circuit breaker state in source_state.
@@ -129,18 +142,34 @@ export async function ingestSource(
     throw error;
   }
 
-  // 3. Normalize & ingest (pre-load existing apply_urls for this source to skip heavy HTML/regex normalization on known duplicates)
+  // 3. Normalize & ingest (check only the apply_urls returned by this batch via indexed IN chunks
+  // to skip heavy HTML/regex normalization on known duplicates without full-scanning the jobs table)
   const existingApplyUrls = new Set<string>();
-  try {
-    const existingRows = await options.db
-      .prepare(`SELECT apply_url FROM jobs WHERE source = ? AND apply_url IS NOT NULL`)
-      .bind(sourceName)
-      .all<{ apply_url: string }>();
-    for (const row of existingRows?.results ?? []) {
-      if (row.apply_url) existingApplyUrls.add(row.apply_url);
+  const batchUrls = Array.from(
+    new Set(
+      rawJobs
+        .map((r) => extractRawApplyUrl(r as Record<string, unknown>))
+        .filter((u): u is string => u !== null),
+    ),
+  );
+
+  if (batchUrls.length > 0) {
+    try {
+      const CHUNK_SIZE = 50;
+      for (let i = 0; i < batchUrls.length; i += CHUNK_SIZE) {
+        const chunk = batchUrls.slice(i, i + CHUNK_SIZE);
+        const placeholders = chunk.map(() => '?').join(', ');
+        const existingRows = await options.db
+          .prepare(`SELECT apply_url FROM jobs WHERE source = ? AND apply_url IN (${placeholders})`)
+          .bind(sourceName, ...chunk)
+          .all<{ apply_url: string }>();
+        for (const row of existingRows?.results ?? []) {
+          if (row.apply_url) existingApplyUrls.add(row.apply_url);
+        }
+      }
+    } catch {
+      // Fallback to per-row dedupe_key check when DB mock does not support IN queries
     }
-  } catch {
-    // Fallback to per-row dedupe_key check when DB mock does not support .all()
   }
 
   let newJobs = 0;
@@ -150,16 +179,8 @@ export async function ingestSource(
   for (const raw of rawJobs) {
     try {
       if (existingApplyUrls.size > 0) {
-        const rawUrl =
-          raw['absolute_url'] ||
-          raw['url'] ||
-          raw['link'] ||
-          raw['hostedUrl'] ||
-          raw['jobUrl'] ||
-          raw['redirect_url'] ||
-          raw['careers_url'] ||
-          raw['applicationLink'];
-        if (typeof rawUrl === 'string' && rawUrl && existingApplyUrls.has(rawUrl)) {
+        const rawUrl = extractRawApplyUrl(raw as Record<string, unknown>);
+        if (rawUrl && existingApplyUrls.has(rawUrl)) {
           duplicates++;
           continue;
         }

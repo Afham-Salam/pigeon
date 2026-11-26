@@ -2373,7 +2373,8 @@ app.get('/api/sources', async (c) => {
     `SELECT entity_id as source, payload
      FROM events
      WHERE type = 'source_run'
-     ORDER BY created_at DESC`,
+     ORDER BY created_at DESC
+     LIMIT 100`,
   ).all<{ source: string; payload: string }>();
 
   const latestStatsBySource = new Map<string, { boards_total?: number; boards_failed?: number }>();
@@ -3556,6 +3557,25 @@ async function enqueueSendApplications(
   return enqueued;
 }
 
+async function enqueueScoreAndRouteDebounced(env: Bindings): Promise<boolean> {
+  const lockKey = 'queue:score_and_route_queued_at';
+  const nowMs = Date.now();
+  try {
+    const raw = await env.CONFIG.get(lockKey);
+    if (raw) {
+      const lastMs = Number.parseInt(raw, 10);
+      if (Number.isFinite(lastMs) && nowMs - lastMs < 60_000) {
+        return false;
+      }
+    }
+    await env.CONFIG.put(lockKey, String(nowMs), { expirationTtl: 120 });
+  } catch {
+    // Proceed even if KV debounce check fails
+  }
+  await env.JOBS_QUEUE.send({ action: 'score_and_route' });
+  return true;
+}
+
 async function executeScoreCron(env: Bindings): Promise<{
   enqueuedActions: string[];
   hasGoogleOAuth: boolean;
@@ -3579,6 +3599,23 @@ async function executeScoreCron(env: Bindings): Promise<{
     const ids = (approvedRows.results || []).map((r) => r.id);
     approvedEnqueued = await enqueueSendApplications(env.JOBS_QUEUE, ids);
   }
+
+  // Recover any orphaned routed jobs missing an initial application (bounded once per 10m cron)
+  try {
+    const orphanedRouted = await env.DB.prepare(
+      `SELECT j.id FROM jobs j
+       LEFT JOIN applications a ON a.job_id = j.id AND a.kind = 'initial'
+       WHERE j.status = 'routed' AND a.id IS NULL
+       ORDER BY j.match_score DESC
+       LIMIT 10`,
+    ).all<{ id: string }>();
+    for (const rj of orphanedRouted.results || []) {
+      await env.JOBS_QUEUE.send({ action: 'create_application', jobId: rj.id });
+    }
+  } catch (err) {
+    logger.error('Error recovering orphaned routed jobs for create_application', err);
+  }
+
   return { enqueuedActions, hasGoogleOAuth, approvedEnqueued };
 }
 
@@ -4038,7 +4075,7 @@ export default {
             slugs: Array.isArray(body.slugs) ? body.slugs : undefined,
           });
           if (ingestRes && ingestRes.newJobs > 0) {
-            await env.JOBS_QUEUE.send({ action: 'score_and_route' });
+            await enqueueScoreAndRouteDebounced(env);
           }
         } catch (err) {
           // Log error so that one source failure does not break other sources in the batch
@@ -4086,23 +4123,16 @@ export default {
               }
             }
 
-            // Enqueue application creation for newly routed jobs that lack an application row
-            const pendingJobs = await env.DB.prepare(
-              `SELECT j.id FROM jobs j
-               LEFT JOIN applications a ON a.job_id = j.id
-               WHERE j.status = 'routed' AND a.id IS NULL
-               ORDER BY j.match_score DESC
-               LIMIT 20`,
-            ).all<{ id: string }>();
-
-            for (const rj of pendingJobs.results || []) {
+            // Enqueue application creation ONLY for jobs routed in this batch (avoids re-scanning and
+            // re-enqueuing the same routed jobs across chained score_and_route batches)
+            for (const jobId of pipelineStats.routedJobIds || []) {
               try {
                 await env.JOBS_QUEUE.send({
                   action: 'create_application',
-                  jobId: rj.id,
+                  jobId,
                 });
               } catch (err) {
-                logger.error(`Error enqueuing create_application for job ${rj.id}`, err);
+                logger.error(`Error enqueuing create_application for job ${jobId}`, err);
               }
             }
           }

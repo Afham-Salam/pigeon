@@ -34,12 +34,20 @@ export interface PipelineStats {
   routed: number;
   deferred_daily_cap: number;
   deferred_rate_limit?: number | undefined;
+  routedJobIds?: string[] | undefined;
 }
 
 export async function getScoredCountToday(db: D1LikeDatabase, datePrefix: string): Promise<number> {
+  const startIso = `${datePrefix}T00:00:00.000Z`;
+  const nextDayMs = Date.parse(startIso) + 24 * 60 * 60 * 1000;
+  const endIso = Number.isFinite(nextDayMs)
+    ? new Date(nextDayMs).toISOString()
+    : `${datePrefix}T23:59:59.999Z`;
   const row = await db
-    .prepare(`SELECT COUNT(*) as count FROM events WHERE type = 'job_scored' AND created_at LIKE ?`)
-    .bind(`${datePrefix}%`)
+    .prepare(
+      `SELECT COUNT(*) as count FROM events WHERE type = 'job_scored' AND created_at >= ? AND created_at < ?`,
+    )
+    .bind(startIso, endIso)
     .first<{ count: number }>();
 
   return row?.count ?? 0;
@@ -221,6 +229,7 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
     scored: 0,
     routed: 0,
     deferred_daily_cap: 0,
+    routedJobIds: [],
   };
 
   let scoredToday = await getScoredCountToday(db, todayPrefix);
@@ -244,6 +253,7 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
     });
     if (res === 'routed') {
       stats.routed++;
+      stats.routedJobIds?.push(job.id);
     } else {
       stats.low_score_skipped++;
     }
@@ -427,6 +437,7 @@ export async function processJobPipeline(options: ProcessPipelineOptions): Promi
 
       if (res === 'routed') {
         stats.routed++;
+        stats.routedJobIds?.push(job.id);
       } else {
         stats.low_score_skipped++;
       }

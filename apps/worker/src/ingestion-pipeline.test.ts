@@ -526,4 +526,91 @@ describe('Ingestion Pipeline & Queue Consumer Tests', () => {
       if (origRemoteOk) ALL_SOURCES['remoteok'] = origRemoteOk;
     }
   });
+
+  it('debounces score_and_route queue enqueues across multiple ingest messages', async () => {
+    await workerEnv.CONFIG.delete('queue:score_and_route_queued_at');
+    const origRemoteOk = ALL_SOURCES['remoteok'];
+    const origRemotive = ALL_SOURCES['remotive'];
+    try {
+      ALL_SOURCES['remoteok'] = {
+        name: 'remoteok',
+        kind: 'api',
+        async fetch() {
+          return [{ id: 'deb-1', position: 'SysEng', company: 'DebCo1', url: 'https://remoteok.com/deb-1' }];
+        },
+        normalize: (raw): NormalizedJob => ({
+          source: 'remoteok',
+          source_kind: 'api',
+          source_job_id: String(raw['id']),
+          title: String(raw['position']),
+          company: String(raw['company']),
+          company_normalized: 'debco1',
+          location: 'Remote',
+          remote: true,
+          salary_min: null,
+          salary_max: null,
+          currency: null,
+          salary_raw: null,
+          description: 'Desc',
+          apply_url: String(raw['url']),
+          contact_email: null,
+          contact_source: 'none',
+          posted_at: null,
+          untrusted: true,
+        }),
+      };
+      ALL_SOURCES['remotive'] = {
+        name: 'remotive',
+        kind: 'api',
+        async fetch() {
+          return [{ id: 'deb-2', title: 'SysEng', company_name: 'DebCo2', url: 'https://remotive.com/deb-2' }];
+        },
+        normalize: (raw): NormalizedJob => ({
+          source: 'remotive',
+          source_kind: 'api',
+          source_job_id: String(raw['id']),
+          title: String(raw['title']),
+          company: String(raw['company_name']),
+          company_normalized: 'debco2',
+          location: 'Remote',
+          remote: true,
+          salary_min: null,
+          salary_max: null,
+          currency: null,
+          salary_raw: null,
+          description: 'Desc',
+          apply_url: String(raw['url']),
+          contact_email: null,
+          contact_source: 'none',
+          posted_at: null,
+          untrusted: true,
+        }),
+      };
+
+      const enqueued: unknown[] = [];
+      const mockQueue = {
+        async send(msg: unknown) {
+          enqueued.push(msg);
+        },
+      } as unknown as Queue;
+
+      await worker.queue(
+        {
+          queue: 'pigeon-jobs',
+          messages: [
+            { id: 'm1', timestamp: new Date(), attempts: 1, body: { source: 'remoteok' }, ack() {}, retry() {} },
+            { id: 'm2', timestamp: new Date(), attempts: 1, body: { source: 'remotive' }, ack() {}, retry() {} },
+          ],
+          ackAll() {},
+          retryAll() {},
+        } as unknown as MessageBatch<unknown>,
+        { ...workerEnv, JOBS_QUEUE: mockQueue },
+      );
+
+      expect(enqueued.filter((m) => (m as { action?: string }).action === 'score_and_route')).toHaveLength(1);
+    } finally {
+      if (origRemoteOk) ALL_SOURCES['remoteok'] = origRemoteOk;
+      if (origRemotive) ALL_SOURCES['remotive'] = origRemotive;
+    }
+  });
 });

@@ -127,6 +127,15 @@ function createMockDb(): {
             return null;
           }
           if (query.includes("COUNT(*) as count FROM events WHERE type = 'job_scored'")) {
+            if (query.includes('created_at >= ? AND created_at < ?')) {
+              const startIso = String(boundParams[0]);
+              const endIso = String(boundParams[1]);
+              const count = events.filter(
+                (e) =>
+                  e.type === 'job_scored' && e.created_at >= startIso && e.created_at < endIso,
+              ).length;
+              return { count } as unknown as T;
+            }
             const prefix = String(boundParams[0]).replace('%', '');
             const count = events.filter(
               (e) => e.type === 'job_scored' && e.created_at.startsWith(prefix),
